@@ -1,0 +1,24 @@
+target: https://juice-shop.example.com
+
+# Default scope: only the target's exact host (juice-shop.example.com).
+# Uncomment to expand to subdomains:
+# scope:
+#   include_domains:
+#     - juice-shop.example.com
+#     - "*.juice-shop.example.com"
+scope:
+  exclude_paths:
+    - /logout
+    - /signout
+    - /admin/dangerous-action
+
+limits:
+  max_pages: 200
+  max_duration_sec: 600
+  rate_limit_rps: 2
+  max_visits_per_template: 3
+
+auth:
+  type: none
+  # type: storage_state
+  # storage_state_path: ./auth.json

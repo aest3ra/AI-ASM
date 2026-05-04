@@ -1,0 +1,14 @@
+target: http://localhost:3000/
+
+# Default scope: only localhost (strict-host).
+# Juice Shop은 단일 호스트 SPA이므로 추가 도메인 불필요.
+
+limits:
+  max_pages: 50
+  max_duration_sec: 600
+  rate_limit_rps: 3
+  max_visits_per_template: 3
+
+auth:
+  type: storage_state
+  storage_state_path: ./auth.json
