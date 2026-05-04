@@ -17,3 +17,5 @@ scans/
 captures/
 *.db
 auth.json
+
+DS_Store
