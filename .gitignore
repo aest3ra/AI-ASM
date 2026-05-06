@@ -17,5 +17,7 @@ scans/
 captures/
 *.db
 auth.json
+auth*.json
+.research/
 
 DS_Store

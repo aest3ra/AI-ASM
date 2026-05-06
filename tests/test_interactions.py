@@ -1,6 +1,6 @@
 import pytest
 
-from ai_asm.crawler.interactions import is_dangerous
+from ai_asm.crawler.interactions import interaction_key, is_dangerous
 
 
 @pytest.mark.parametrize("text", [
@@ -42,3 +42,12 @@ def test_safe(text: str):
 def test_empty():
     assert not is_dangerous("")
     assert not is_dangerous(None)  # type: ignore[arg-type]
+
+
+def test_interaction_key_normalizes_text_and_route_target():
+    assert interaction_key("  Login  ", "/#/login", "button") == "button|login|/#/login"
+    assert interaction_key("Login", "/#/login", "button") == interaction_key(
+        " login ",
+        "/#/login",
+        "button",
+    )

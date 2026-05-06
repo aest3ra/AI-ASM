@@ -16,7 +16,7 @@ uv run playwright install chromium
 ```
 
 ## 사용
-
+cat
 ```bash
 # BFS 크롤 + 정규화 + DB 저장
 uv run ai-asm scan examples/scan_config.yaml
@@ -72,6 +72,13 @@ src/ai_asm/
 | `limits.max_visits_per_template` | 같은 path_template 최대 방문 횟수 (default 3, 게시판 폭증 방지) |
 | `auth.type` | `none` 또는 `storage_state` |
 | `auth.storage_state_path` | Playwright `storage_state` JSON 경로 |
+| `static_probe_auth` | static GET probe 인증 모드. 기본 `cookie-only`, 옵션 `none`/`learned` |
+
+CLI에서 일회성으로 바꿀 수도 있다.
+
+```bash
+uv run ai-asm scan examples/scan_config.yaml --auth auth.json --static-probe-auth learned
+```
 
 ## 테스트
 

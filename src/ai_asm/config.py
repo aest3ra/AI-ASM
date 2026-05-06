@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 import yaml
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
+StaticProbeAuthMode = Literal["none", "cookie-only", "learned"]
+
 
 class ScopeConfig(BaseModel):
     """Crawl scope. If `include_domains` is omitted, the loader fills it with
@@ -44,6 +46,7 @@ class ScanConfig(BaseModel):
     scope: ScopeConfig = Field(default_factory=ScopeConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    static_probe_auth: StaticProbeAuthMode = "cookie-only"
 
     @model_validator(mode="after")
     def _default_scope_to_target_host(self) -> "ScanConfig":

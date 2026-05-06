@@ -1,0 +1,85 @@
+import asyncio
+
+from ai_asm.shared.candidate_store import CandidateEndpoint, CandidateStore
+from ai_asm.shared.decision_trace import DecisionTrace
+from ai_asm.shared.facade import RegistryFacade
+from ai_asm.shared.response_store import ResponseStore
+from ai_asm.shared.verified_store import VerifiedEndpoint, VerifiedStore
+
+
+def test_candidate_store_dedupes_and_prioritizes_pending():
+    async def run():
+        store = CandidateStore()
+        candidate = CandidateEndpoint(
+            method="GET",
+            url="https://example.com/api/users/1",
+            host="example.com",
+            path_template="/api/users/{id}",
+            source_url="https://example.com/app.js",
+            source_kind="static_js",
+        )
+
+        added = await store.add(candidate)
+        duplicate = await store.add(candidate)
+
+        assert added is True
+        assert duplicate is False
+        assert await store.pending_count() == 1
+        assert [c.path_template for c in await store.top_n(5)] == [
+            "/api/users/{id}",
+        ]
+
+    asyncio.run(run())
+
+
+def test_registry_facade_summarizes_stores():
+    async def run():
+        candidates = CandidateStore()
+        verified = VerifiedStore()
+        responses = ResponseStore()
+        trace = DecisionTrace(scan_id=7)
+
+        await candidates.add(CandidateEndpoint(
+            method="GET",
+            url="https://example.com/api/users",
+            host="example.com",
+            path_template="/api/users",
+            source_url="https://example.com/app.js",
+            source_kind="static_js",
+        ))
+        await verified.mark(VerifiedEndpoint(
+            method="POST",
+            url="https://example.com/api/orders",
+            host="example.com",
+            path_template="/api/orders",
+            page_url="https://example.com/cart",
+            provenance="cdp_capture",
+        ))
+        await responses.observe(
+            method="GET",
+            url="https://example.com/api/users",
+            status=200,
+            mime="application/json",
+            body='{"id": 1}',
+        )
+        await trace.log_dispatch(
+            page_url="https://example.com",
+            accepted=True,
+            reason="accepted",
+            url="https://example.com/app.js",
+        )
+
+        summary = await RegistryFacade(
+            candidates=candidates,
+            verified=verified,
+            responses=responses,
+            trace=trace,
+        ).summary("example.com")
+
+        assert summary["host"] == "example.com"
+        assert summary["candidates_unverified"] == 1
+        assert summary["verified_endpoints"] == 1
+        assert summary["response_samples"] == 1
+        assert summary["trace_events"] == 1
+
+    asyncio.run(run())

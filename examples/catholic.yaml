@@ -1,4 +1,4 @@
-target: https://www.catholic.ac.kr/
+target: https://uportal.catholic.ac.kr/
 
 # scope.include_domains is omitted on purpose: by default the crawler stays on
 # the target's exact host (www.catholic.ac.kr). To also follow links into

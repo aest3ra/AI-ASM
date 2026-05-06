@@ -1,9 +1,16 @@
 from collections import deque
 
 from ai_asm.config import AuthConfig, LimitsConfig, ScopeConfig
-from ai_asm.crawler.runner import Crawler, _template_key, normalize_url
+from ai_asm.crawler.runner import (
+    Crawler,
+    _frontier_seen_key,
+    _has_out_of_scope_redirect_target,
+    _route_seen_key,
+    _template_key,
+    normalize_url,
+)
 from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import ScanDiagnostics
+from ai_asm.crawler.types import FrontierItem, ScanDiagnostics
 
 
 def test_normalize_strips_plain_anchor():
@@ -25,6 +32,11 @@ def test_normalize_keeps_spa_hash_route():
     assert normalize_url("https://x/#/admin/users") == "https://x/#/admin/users"
 
 
+def test_normalize_canonicalizes_route_relative_hash_route():
+    """A hash route discovered from `/page#/next` should enqueue as `/#/next`."""
+    assert normalize_url("https://x/page#/login") == "https://x/#/login"
+
+
 def test_normalize_keeps_legacy_hashbang_route():
     """`#!/foo` is the older AngularJS hashbang convention."""
     assert normalize_url("https://x/#!/about") == "https://x/#!/about"
@@ -40,6 +52,36 @@ def test_template_key_uses_hash_route_path():
 def test_template_key_collapses_numeric_id():
     assert _template_key("https://x/board/view/123") == ("x", "/board/view/{id}")
     assert _template_key("https://x/board/view/124") == ("x", "/board/view/{id}")
+
+
+def test_route_seen_key_treats_hash_and_path_spa_routes_as_same_state():
+    assert _route_seen_key("https://x/#/login") == _route_seen_key("https://x/login")
+    assert _route_seen_key("https://x/app#/search?q=apple") == _route_seen_key(
+        "https://x/search?q=apple",
+    )
+
+
+def test_frontier_seen_key_includes_dom_signature_when_known():
+    first = _frontier_seen_key(FrontierItem("https://x/#/settings", "aaa"))
+    second = _frontier_seen_key(FrontierItem("https://x/settings", "bbb"))
+    duplicate = _frontier_seen_key(FrontierItem("https://x/settings", "aaa"))
+
+    assert first != second
+    assert first == duplicate
+
+
+def test_detects_out_of_scope_redirect_targets():
+    scope = Scope(ScopeConfig(include_domains=["x.test"]))
+
+    assert _has_out_of_scope_redirect_target(
+        "https://x.test/redirect?to=https://github.com/example/repo",
+        scope,
+    )
+    assert not _has_out_of_scope_redirect_target(
+        "https://x.test/redirect?to=https://x.test/help",
+        scope,
+    )
+    assert not _has_out_of_scope_redirect_target("https://x.test/search?q=a", scope)
 
 
 def _make_crawler(cap: int = 3) -> Crawler:
@@ -100,7 +142,7 @@ def test_already_seen_url_does_not_count_twice():
     crawler = _make_crawler(cap=3)
     diag = ScanDiagnostics()
     queue: deque[str] = deque()
-    seen: set[str] = {"https://x.test/p/1"}
+    seen: set = {_frontier_seen_key(FrontierItem("https://x.test/p/1"))}
     crawler._try_enqueue("https://x.test/p/1", queue, seen, diag, cap=3)
     assert len(queue) == 0
     assert diag.links_enqueued == 0
@@ -133,3 +175,65 @@ def test_out_of_scope_url_blocked_at_enqueue():
     assert len(queue) == 0
     assert diag.links_enqueued == 0
     assert diag.template_seen == {}
+
+
+def test_hash_and_path_spa_routes_are_not_enqueued_twice():
+    crawler = _make_crawler(cap=3)
+    diag = ScanDiagnostics()
+    queue: deque[str] = deque()
+    seen: set = set()
+
+    crawler._try_enqueue("https://x.test/#/login", queue, seen, diag, cap=3)
+    crawler._try_enqueue("https://x.test/login", queue, seen, diag, cap=3)
+
+    assert [item.url for item in queue] == ["https://x.test/#/login"]
+    assert diag.links_enqueued == 1
+
+
+def test_same_route_with_different_known_dom_signatures_can_enqueue():
+    crawler = _make_crawler(cap=3)
+    diag = ScanDiagnostics()
+    queue: deque[FrontierItem] = deque()
+    seen: set = set()
+
+    crawler._try_enqueue(
+        "https://x.test/dashboard",
+        queue,
+        seen,
+        diag,
+        cap=3,
+        dom_signature="state-a",
+    )
+    crawler._try_enqueue(
+        "https://x.test/dashboard",
+        queue,
+        seen,
+        diag,
+        cap=3,
+        dom_signature="state-b",
+    )
+
+    assert [(item.url, item.dom_signature) for item in queue] == [
+        ("https://x.test/dashboard", "state-a"),
+        ("https://x.test/dashboard", "state-b"),
+    ]
+    assert diag.links_enqueued == 2
+
+
+def test_out_of_scope_redirect_link_blocked_at_enqueue():
+    crawler = _make_crawler(cap=3)
+    diag = ScanDiagnostics()
+    queue: deque[str] = deque()
+    seen: set = set()
+
+    crawler._try_enqueue(
+        "https://x.test/redirect?to=https://github.com/juice-shop/juice-shop",
+        queue,
+        seen,
+        diag,
+        cap=3,
+    )
+
+    assert len(queue) == 0
+    assert diag.links_enqueued == 0
+    assert diag.links_skipped_external_redirect == 1

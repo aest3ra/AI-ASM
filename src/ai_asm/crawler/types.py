@@ -14,6 +14,8 @@ class CapturedRequest:
     resource_type: str
     request_headers: dict[str, str] = field(default_factory=dict)
     post_data: str | None = None
+    page_url: str | None = None
+    source: str = "cdp"
 
     response_status: int | None = None
     response_headers: dict[str, str] = field(default_factory=dict)
@@ -21,6 +23,22 @@ class CapturedRequest:
     response_body: str | None = None
     response_body_truncated: bool = False
     body_fetch_error: str | None = None
+
+
+@dataclass
+class StaticProbeAuthProfile:
+    origin: str
+    headers: dict[str, str]
+    learned_from_url: str
+    observed_count: int = 1
+
+
+@dataclass
+class FrontierItem:
+    url: str
+    dom_signature: str | None = None
+    replay_steps_json: str | None = None
+    db_id: int | None = None
 
 
 @dataclass
@@ -42,6 +60,7 @@ class InteractionStats:
     buttons_seen: int = 0
     buttons_clicked: int = 0
     buttons_skipped_danger: int = 0
+    discovered_urls: list[str] = field(default_factory=list)
     forms: FormStats = field(default_factory=FormStats)
 
 
@@ -51,7 +70,11 @@ class PageDiagnostics:
     the runner into `ScanDiagnostics`; not retained per-page."""
 
     nav_error: str | None = None
+    dom_signature: str | None = None
     body_fetch_failures: int = 0
+    init_script_requests_recorded: int = 0
+    init_script_requests_added: int = 0
+    out_of_scope_requests_aborted: int = 0
     interactions: InteractionStats = field(default_factory=InteractionStats)
 
 
@@ -63,12 +86,21 @@ class ScanDiagnostics:
     pages_failed: int = 0
     links_enqueued: int = 0
     links_skipped_template_cap: int = 0
+    links_skipped_external_redirect: int = 0
     body_fetch_failures: int = 0
+    init_script_requests_recorded: int = 0
+    init_script_requests_added: int = 0
+    dom_signatures_seen: set[str] = field(default_factory=set)
+    out_of_scope_requests_aborted: int = 0
     buttons_clicked: int = 0
     buttons_skipped_danger: int = 0
     forms_submitted: int = 0
     forms_skipped_password: int = 0
     forms_skipped_other: int = 0  # danger + file + multipart
+    static_gets_probed: int = 0
+    static_get_probe_failures: int = 0
+    static_probe_auth_profiles: int = 0
+    static_probe_auth_headers_applied: int = 0
     template_visits: Counter[tuple[str, str]] = field(default_factory=Counter)
     template_seen: Counter[tuple[str, str]] = field(default_factory=Counter)
 

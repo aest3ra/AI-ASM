@@ -22,6 +22,7 @@ scope:
     assert cfg.scope.include_domains == ["example.com"]
     assert cfg.limits.max_pages == 200
     assert cfg.auth.type == "none"
+    assert cfg.static_probe_auth == "cookie-only"
 
 
 def test_storage_state_requires_path(tmp_path: Path):
@@ -75,7 +76,9 @@ limits:
 auth:
   type: storage_state
   storage_state_path: ./auth.json
+static_probe_auth: learned
 """))
     assert cfg.limits.max_pages == 50
     assert cfg.auth.storage_state_path == Path("./auth.json")
     assert "/logout" in cfg.scope.exclude_paths
+    assert cfg.static_probe_auth == "learned"

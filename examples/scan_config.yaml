@@ -1,4 +1,4 @@
-target: https://juice-shop.example.com
+target: http://localhost:3000/
 
 # Default scope: only the target's exact host (juice-shop.example.com).
 # Uncomment to expand to subdomains:
@@ -22,3 +22,6 @@ auth:
   type: none
   # type: storage_state
   # storage_state_path: ./auth.json
+
+# Static GET probe auth mode: none | cookie-only | learned
+static_probe_auth: cookie-only
