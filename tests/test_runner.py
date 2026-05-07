@@ -10,7 +10,7 @@ from ai_asm.crawler.runner import (
     normalize_url,
 )
 from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import FrontierItem, ScanDiagnostics
+from ai_asm.crawler.types import FrontierItem, InteractionStats, ScanDiagnostics
 
 
 def test_normalize_strips_plain_anchor():
@@ -237,3 +237,23 @@ def test_out_of_scope_redirect_link_blocked_at_enqueue():
     assert len(queue) == 0
     assert diag.links_enqueued == 0
     assert diag.links_skipped_external_redirect == 1
+
+
+def test_crawler_interactions_go_through_agent_driver(monkeypatch):
+    async def fake_agent_driver(page, **kwargs):
+        assert page == "fake-page"
+        assert kwargs["scope"].allows("https://x.test/")
+        assert isinstance(kwargs["clicked_keys"], set)
+        return InteractionStats(buttons_seen=1, buttons_clicked=1)
+
+    monkeypatch.setattr(
+        "ai_asm.crawler.runner.run_agent_interactions",
+        fake_agent_driver,
+    )
+
+    import asyncio
+
+    stats = asyncio.run(_make_crawler()._trigger_interactions("fake-page"))
+
+    assert stats.buttons_seen == 1
+    assert stats.buttons_clicked == 1

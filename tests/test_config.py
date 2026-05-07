@@ -23,6 +23,9 @@ scope:
     assert cfg.limits.max_pages == 200
     assert cfg.auth.type == "none"
     assert cfg.static_probe_auth == "cookie-only"
+    assert cfg.agent.mode == "mock"
+    assert cfg.agent.model == "gpt-5-mini"
+    assert cfg.agent.temperature == 0.0
 
 
 def test_storage_state_requires_path(tmp_path: Path):
@@ -77,8 +80,19 @@ auth:
   type: storage_state
   storage_state_path: ./auth.json
 static_probe_auth: learned
+agent:
+  mode: llm
+  model: gpt-5
+  temperature: 0.2
+  max_steps_per_page: 7
+  form_data_path: ./forms.yaml
 """))
     assert cfg.limits.max_pages == 50
     assert cfg.auth.storage_state_path == Path("./auth.json")
     assert "/logout" in cfg.scope.exclude_paths
     assert cfg.static_probe_auth == "learned"
+    assert cfg.agent.mode == "llm"
+    assert cfg.agent.model == "gpt-5"
+    assert cfg.agent.temperature == 0.2
+    assert cfg.agent.max_steps_per_page == 7
+    assert cfg.agent.form_data_path == Path("./forms.yaml")

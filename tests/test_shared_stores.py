@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from ai_asm.shared.candidate_store import CandidateEndpoint, CandidateStore
 from ai_asm.shared.decision_trace import DecisionTrace
@@ -81,5 +82,27 @@ def test_registry_facade_summarizes_stores():
         assert summary["verified_endpoints"] == 1
         assert summary["response_samples"] == 1
         assert summary["trace_events"] == 1
+
+    asyncio.run(run())
+
+
+def test_decision_trace_writes_jsonl(tmp_path):
+    async def run():
+        trace_path = tmp_path / "trace.jsonl"
+        trace = DecisionTrace(scan_id=42, path=trace_path)
+
+        await trace.log_turn(
+            page_url="https://example.com/",
+            payload={"tool_calls": ["scroll"]},
+        )
+
+        rows = [
+            json.loads(line)
+            for line in trace_path.read_text().splitlines()
+        ]
+        assert len(rows) == 1
+        assert rows[0]["scan_id"] == 42
+        assert rows[0]["kind"] == "agent_turn"
+        assert rows[0]["payload"] == {"tool_calls": ["scroll"]}
 
     asyncio.run(run())

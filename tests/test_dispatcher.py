@@ -194,3 +194,25 @@ def test_dispatcher_calls_reject_recorder():
         ]
 
     asyncio.run(run())
+
+
+def test_dispatcher_dispatch_many_applies_queue_backpressure():
+    async def run():
+        dispatcher, _, _, _ = _dispatcher(
+            queue_max=1,
+            concurrency=1,
+            same_url_min_interval_sec=0,
+        )
+        caps = [
+            _cap(
+                url=f"https://example.com/app-{idx}.js",
+                body=f"fetch('/api/users/{idx}')",
+            )
+            for idx in range(20)
+        ]
+
+        await dispatcher.dispatch_many(caps, page_url="https://example.com/")
+
+        assert dispatcher.stats.rejected["track1_queue_full"] > 0
+
+    asyncio.run(run())

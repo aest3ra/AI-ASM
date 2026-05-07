@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 from playwright.async_api import BrowserContext
 
+from ai_asm.agent.network import NetworkEventBuffer
 from ai_asm.agent.snapshot import compute_dom_signature
 from ai_asm.crawler.scope import Scope
 from ai_asm.crawler.types import (
@@ -118,6 +119,7 @@ async def capture_page(
     Failures are recorded in diagnostics rather than raised.
     """
     captured: dict[str, CapturedRequest] = {}
+    network_events = NetworkEventBuffer()
     diag = PageDiagnostics()
 
     page = await context.new_page()
@@ -132,6 +134,11 @@ async def capture_page(
 
     def on_request(event: dict) -> None:
         req = event["request"]
+        network_events.record(
+            method=req["method"],
+            url=req["url"],
+            resource_type=event.get("type", "Other"),
+        )
         captured[event["requestId"]] = CapturedRequest(
             request_id=event["requestId"],
             method=req["method"],
@@ -175,7 +182,7 @@ async def capture_page(
 
     if interact:
         try:
-            stats = await interact(page)
+            stats = await interact(page, network_events=network_events)
             if stats is not None:
                 diag.interactions = stats
                 links.extend(stats.discovered_urls)
@@ -355,11 +362,13 @@ async def _dispatch_captures(
     *,
     page_url: str,
 ) -> None:
+    if hasattr(analyzer_dispatcher, "dispatch_many"):
+        await analyzer_dispatcher.dispatch_many(captures, page_url=page_url)
+        return
     tasks = [
         analyzer_dispatcher.dispatch_capture(cap, page_url=page_url)
         for cap in captures
         if cap.response_body and not cap.body_fetch_error
     ]
-    if not tasks:
-        return
-    await asyncio.gather(*tasks, return_exceptions=True)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)

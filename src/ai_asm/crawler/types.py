@@ -55,7 +55,7 @@ class FormStats:
 
 @dataclass
 class InteractionStats:
-    """How many UI elements `trigger_interactions` saw and acted on."""
+    """How many UI elements the browser agent saw and acted on."""
 
     buttons_seen: int = 0
     buttons_clicked: int = 0

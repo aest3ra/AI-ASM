@@ -10,6 +10,9 @@ import yaml
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 StaticProbeAuthMode = Literal["none", "cookie-only", "learned"]
+AgentMode = Literal["mock", "llm"]
+DEFAULT_AGENT_MODEL = "gpt-5-mini"
+DEFAULT_AGENT_TEMPERATURE = 0.0
 
 
 class ScopeConfig(BaseModel):
@@ -41,12 +44,21 @@ class AuthConfig(BaseModel):
         return self
 
 
+class AgentConfig(BaseModel):
+    mode: AgentMode = "mock"
+    model: str = DEFAULT_AGENT_MODEL
+    temperature: float = Field(default=DEFAULT_AGENT_TEMPERATURE, ge=0.0, le=2.0)
+    max_steps_per_page: int = Field(default=24, gt=0)
+    form_data_path: Path | None = Path("testdata/forms/default.yaml")
+
+
 class ScanConfig(BaseModel):
     target: HttpUrl
     scope: ScopeConfig = Field(default_factory=ScopeConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     static_probe_auth: StaticProbeAuthMode = "cookie-only"
+    agent: AgentConfig = Field(default_factory=AgentConfig)
 
     @model_validator(mode="after")
     def _default_scope_to_target_host(self) -> "ScanConfig":

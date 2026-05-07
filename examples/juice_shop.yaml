@@ -17,3 +17,9 @@ auth:
 # cookie-only: storage_state 쿠키만 사용 (기본)
 # learned: 실제 브라우저 요청에서 관측된 Authorization 헤더를 same-origin probe에 재사용
 static_probe_auth: cookie-only
+
+agent:
+  mode: mock
+  model: gpt-5-mini
+  max_steps_per_page: 24
+  form_data_path: testdata/forms/default.yaml

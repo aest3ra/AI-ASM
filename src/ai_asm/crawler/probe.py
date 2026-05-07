@@ -7,14 +7,40 @@ from collections import Counter, defaultdict
 from typing import Literal
 from urllib.parse import urlparse
 
-from playwright.async_api import BrowserContext
+from playwright.async_api import BrowserContext, async_playwright
 
+from ai_asm.config import AuthConfig
 from ai_asm.crawler.scope import Scope
 from ai_asm.crawler.types import CapturedRequest, StaticProbeAuthProfile
 from ai_asm.normalizer.static import ApiCandidate
 
 MAX_STATIC_GET_PROBES = 25
 StaticProbeAuthMode = Literal["none", "cookie-only", "learned"]
+
+
+async def probe_static_get_with_auth_context(
+    auth: AuthConfig,
+    candidates: list[ApiCandidate],
+    *,
+    headless: bool,
+    auth_mode: StaticProbeAuthMode,
+    auth_profiles: dict[str, StaticProbeAuthProfile] | None = None,
+    max_probes: int = MAX_STATIC_GET_PROBES,
+) -> tuple[list[CapturedRequest], set[str], dict[str, str]]:
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=headless)
+        context_kwargs = {} if auth_mode == "none" else _context_kwargs(auth)
+        context = await browser.new_context(**context_kwargs)
+        try:
+            return await probe_static_get_candidates(
+                context,
+                candidates,
+                max_probes=max_probes,
+                auth_mode=auth_mode,
+                auth_profiles=auth_profiles,
+            )
+        finally:
+            await browser.close()
 
 
 async def probe_static_get_candidates(
@@ -202,3 +228,9 @@ def _origin(url: str) -> str:
 
 def _successful(status: int | None) -> bool:
     return status is not None and 200 <= status < 400
+
+
+def _context_kwargs(auth: AuthConfig) -> dict:
+    if auth.type == "storage_state" and auth.storage_state_path:
+        return {"storage_state": str(auth.storage_state_path)}
+    return {}

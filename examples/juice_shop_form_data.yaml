@@ -1,0 +1,10 @@
+defaults:
+  email: admin@juice-sh.op
+  password: admin123
+  text: apple
+
+fields:
+  email: admin@juice-sh.op
+  password: admin123
+  search: apple
+  q: apple

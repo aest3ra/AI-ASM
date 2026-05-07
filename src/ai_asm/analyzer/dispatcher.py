@@ -26,6 +26,7 @@ class DispatcherLimits:
     html_max_bytes: int = 2 * 1024 * 1024
     per_analysis_timeout_sec: float = 5.0
     concurrency: int = 4
+    queue_max: int = 100
     same_url_min_interval_sec: float = 5.0
     same_url_max_count: int = 3
 
@@ -143,6 +144,42 @@ class AnalyzerDispatcher:
                     url=candidate.url,
                     source_kind=candidate.source_kind,
                 )
+
+    async def dispatch_many(
+        self,
+        captures,
+        *,
+        page_url: str | None = None,
+    ) -> None:
+        queue: asyncio.Queue[CapturedRequest] = asyncio.Queue(
+            maxsize=self.limits.queue_max,
+        )
+
+        async def worker() -> None:
+            while True:
+                cap = await queue.get()
+                try:
+                    await self.dispatch_capture(cap, page_url=page_url)
+                finally:
+                    queue.task_done()
+
+        workers = [
+            asyncio.create_task(worker())
+            for _ in range(self.limits.concurrency)
+        ]
+        try:
+            for cap in captures:
+                if not cap.response_body or cap.body_fetch_error:
+                    continue
+                try:
+                    queue.put_nowait(cap)
+                except asyncio.QueueFull:
+                    await self._reject("track1_queue_full", cap, page_url)
+            await queue.join()
+        finally:
+            for task in workers:
+                task.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
 
     async def _analyze(
         self,

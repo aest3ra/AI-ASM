@@ -25,3 +25,9 @@ auth:
 
 # Static GET probe auth mode: none | cookie-only | learned
 static_probe_auth: cookie-only
+
+agent:
+  mode: mock        # mock | llm
+  model: gpt-5-mini
+  max_steps_per_page: 24
+  form_data_path: testdata/forms/default.yaml

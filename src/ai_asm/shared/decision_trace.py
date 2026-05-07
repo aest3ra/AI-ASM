@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 TraceKind = Literal[
@@ -16,6 +18,8 @@ TraceKind = Literal[
     "candidate_added",
     "endpoint_verified",
     "llm_failure",
+    "action_record",
+    "state_checkpoint",
     "page_complete",
 ]
 
@@ -30,8 +34,19 @@ class TraceEvent:
 
 
 class DecisionTrace:
-    def __init__(self, *, scan_id: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        scan_id: int = 0,
+        path: str | Path | None = None,
+        reset: bool = True,
+    ) -> None:
         self.scan_id = scan_id
+        self.path = Path(path) if path is not None else None
+        if self.path is not None:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            if reset:
+                self.path.write_text("")
         self._lock = asyncio.Lock()
         self._events: list[TraceEvent] = []
 
@@ -40,6 +55,23 @@ class DecisionTrace:
 
     async def log_tool(self, *, page_url: str | None, payload: dict) -> None:
         await self._append("tool_call", page_url, payload)
+
+    async def log_tool_rejected(self, *, page_url: str | None, payload: dict) -> None:
+        await self._append("tool_rejected", page_url, payload)
+
+    async def log_llm_failure(self, *, page_url: str | None, payload: dict) -> None:
+        await self._append("llm_failure", page_url, payload)
+
+    async def log_action_record(self, *, page_url: str | None, payload: dict) -> None:
+        await self._append("action_record", page_url, payload)
+
+    async def log_state_checkpoint(
+        self,
+        *,
+        page_url: str | None,
+        payload: dict,
+    ) -> None:
+        await self._append("state_checkpoint", page_url, payload)
 
     async def log_dispatch(
         self,
@@ -88,10 +120,26 @@ class DecisionTrace:
         payload: dict,
     ) -> None:
         async with self._lock:
-            self._events.append(TraceEvent(
+            event = TraceEvent(
                 ts=time.time(),
                 scan_id=self.scan_id,
                 page_url=page_url,
                 kind=kind,
                 payload=payload,
-            ))
+            )
+            self._events.append(event)
+            if self.path is not None:
+                with self.path.open("a", encoding="utf-8") as fh:
+                    fh.write(
+                        json.dumps(
+                            {
+                                "ts": event.ts,
+                                "scan_id": event.scan_id,
+                                "page_url": event.page_url,
+                                "kind": event.kind,
+                                "payload": event.payload,
+                            },
+                            ensure_ascii=False,
+                            default=str,
+                        ) + "\n"
+                    )
