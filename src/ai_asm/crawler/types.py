@@ -87,6 +87,7 @@ class ScanDiagnostics:
     links_enqueued: int = 0
     links_skipped_template_cap: int = 0
     links_skipped_external_redirect: int = 0
+    links_skipped_danger: int = 0
     body_fetch_failures: int = 0
     init_script_requests_recorded: int = 0
     init_script_requests_added: int = 0

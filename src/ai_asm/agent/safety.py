@@ -4,19 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-DANGER_KEYWORDS = {
-    "logout",
-    "log out",
-    "sign out",
-    "delete",
-    "remove",
-    "withdraw",
-    "unsubscribe",
-    "회원탈퇴",
-    "탈퇴",
-    "로그아웃",
-    "삭제",
-}
+from ai_asm.safety import DANGER_KEYWORDS, matched_keyword
 
 
 def classify_form_text(text: str) -> str:
@@ -69,14 +57,6 @@ def interaction_key(info: dict[str, Any], label: str | None = None) -> str:
     normalized = " ".join((label or label_for_ref(info)).lower().split())
     href = str(info.get("href") or "").strip()
     return f"{kind}|{normalized}|{href}"
-
-
-def matched_keyword(text: str, keywords: set[str]) -> str | None:
-    lowered = text.lower()
-    for keyword in keywords:
-        if keyword.lower() in lowered:
-            return keyword
-    return None
 
 
 def safe_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:

@@ -13,6 +13,7 @@ from ai_asm.config import AuthConfig
 from ai_asm.crawler.scope import Scope
 from ai_asm.crawler.types import CapturedRequest, StaticProbeAuthProfile
 from ai_asm.normalizer.static import ApiCandidate
+from ai_asm.safety import is_dangerous_url
 
 MAX_STATIC_GET_PROBES = 25
 StaticProbeAuthMode = Literal["none", "cookie-only", "learned"]
@@ -202,6 +203,8 @@ def _is_probeable_url(url: str) -> bool:
     if parsed.scheme not in ("http", "https"):
         return False
     if any(token in url for token in ("{", "}", "$", "`", "${", "<", ">")):
+        return False
+    if is_dangerous_url(url):
         return False
     return True
 

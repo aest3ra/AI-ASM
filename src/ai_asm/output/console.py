@@ -104,6 +104,7 @@ def print_diagnostics(diag: ScanDiagnostics, cap: int) -> None:
     table.add_row("links enqueued (after dedupe + cap)", str(diag.links_enqueued))
     table.add_row(f"links capped (template hit ≥{cap})", str(diag.links_skipped_template_cap))
     table.add_row("links skipped (external redirect)", str(diag.links_skipped_external_redirect))
+    table.add_row("links skipped (danger)", str(diag.links_skipped_danger))
     table.add_row("buttons clicked", str(diag.buttons_clicked))
     table.add_row("buttons skipped (danger)", str(diag.buttons_skipped_danger))
     table.add_row("POST forms submitted", str(diag.forms_submitted))

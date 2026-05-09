@@ -177,6 +177,20 @@ def test_out_of_scope_url_blocked_at_enqueue():
     assert diag.template_seen == {}
 
 
+def test_dangerous_url_blocked_at_enqueue():
+    crawler = _make_crawler(cap=3)
+    diag = ScanDiagnostics()
+    queue: deque[str] = deque()
+    seen: set[str] = set()
+
+    crawler._try_enqueue("https://x.test/ilos/lo/logout.acl", queue, seen, diag, cap=3)
+
+    assert len(queue) == 0
+    assert diag.links_enqueued == 0
+    assert diag.links_skipped_danger == 1
+    assert diag.template_seen == {}
+
+
 def test_hash_and_path_spa_routes_are_not_enqueued_twice():
     crawler = _make_crawler(cap=3)
     diag = ScanDiagnostics()

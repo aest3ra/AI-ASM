@@ -15,6 +15,7 @@ from ai_asm.agent.safety import (
     safe_tool_arguments,
 )
 from ai_asm.crawler.scope import Scope
+from ai_asm.safety import dangerous_url_keyword
 from ai_asm.shared.decision_trace import DecisionTrace
 from ai_asm.storage.repo import record_flagged_item
 
@@ -157,6 +158,17 @@ class ToolExecutor:
                 description=f"Navigate rejected out of scope: {url}",
                 error="rejected: out of scope",
             )
+        matched = dangerous_url_keyword(url)
+        if matched:
+            return await self._reject(
+                call,
+                flag_kind="agent_blacklist",
+                item_kind="navigate",
+                url=url,
+                description=f"Navigate rejected by blacklist: {url}",
+                context={"matched_keyword": matched, "url": url},
+                error="rejected: blacklist",
+            )
         await self.page.navigate(url)
         return await self._ok(call, {"url": url})
 
@@ -196,6 +208,25 @@ class ToolExecutor:
                     context={"ref": ref, "label": label, "href": fallback_url},
                     error="rejected: out of scope",
                 )
+            matched = dangerous_url_keyword(fallback_url)
+            if matched:
+                return await self._reject(
+                    call,
+                    flag_kind="agent_blacklist",
+                    item_kind="click",
+                    url=fallback_url,
+                    description=(
+                        "Click fallback rejected by blacklist: "
+                        f"{fallback_url}"
+                    ),
+                    context={
+                        "ref": ref,
+                        "label": label,
+                        "href": fallback_url,
+                        "matched_keyword": matched,
+                    },
+                    error="rejected: blacklist",
+                )
             await self.page.navigate(fallback_url)
             return await self._ok(
                 call,
@@ -222,6 +253,20 @@ class ToolExecutor:
     async def _submit_form(self, call: ToolCall) -> ToolResult:
         ref = str(call.arguments.get("ref") or "")
         info = await self._describe_ref(ref)
+        matched = matched_danger_keyword(info)
+        if matched:
+            return await self._reject(
+                call,
+                flag_kind="agent_blacklist",
+                item_kind="form_submit",
+                description=f"Form submit rejected by blacklist: {label_for_ref(info)}",
+                context={
+                    "ref": ref,
+                    "matched_keyword": matched,
+                    "label": label_for_ref(info),
+                },
+                error="rejected: blacklist",
+            )
         action_url = str(info.get("form_action") or self.page_url or "")
         if action_url and not self.scope.allows(action_url):
             return await self._reject(

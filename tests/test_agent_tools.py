@@ -266,6 +266,27 @@ def test_tool_executor_rejects_blacklisted_click(tmp_path):
     asyncio.run(run())
 
 
+def test_tool_executor_rejects_blacklisted_navigation(tmp_path):
+    async def run():
+        executor, engine, _ = _executor(tmp_path)
+
+        result = await executor.execute(ToolCall(
+            id="t3b",
+            name="navigate",
+            arguments={"url": "https://example.com/ilos/lo/logout.acl"},
+        ))
+
+        assert result.ok is False
+        assert "blacklist" in result.error
+        assert executor.page.actions == []
+        with Session(engine) as session:
+            rows = session.exec(select(FlaggedItem)).all()
+        assert rows[0].flag_kind == "agent_blacklist"
+        assert rows[0].item_kind == "navigate"
+
+    asyncio.run(run())
+
+
 def test_tool_executor_allows_upload_labeled_forms(tmp_path):
     async def run():
         executor, engine, _ = _executor(tmp_path)
