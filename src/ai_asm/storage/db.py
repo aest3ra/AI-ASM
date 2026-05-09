@@ -98,6 +98,33 @@ class StaticCandidate(SQLModel, table=True):
     probe_error: str | None = None
 
 
+class UrlSurface(SQLModel, table=True):
+    __tablename__ = "url_surface"
+    __table_args__ = (
+        UniqueConstraint(
+            "scan_id", "method", "host", "path_template", "route_kind",
+            name="uq_url_surface_scan_method_host_path_kind",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    scan_id: int = Field(foreign_key="scan.id", index=True)
+    method: str
+    host: str
+    path_template: str
+    sample_url: str
+    source_kind: str
+    observed: bool = False
+    status_code: int | None = None
+    mime: str | None = None
+    resource_type: str | None = None
+    route_kind: str = Field(index=True)
+    api_score: int = 0
+    evidence_json: str = "{}"
+    source_url: str | None = None
+    seen_count: int = 1
+
+
 class FlaggedItem(SQLModel, table=True):
     __tablename__ = "flagged_items"
     __table_args__ = (

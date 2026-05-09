@@ -11,9 +11,12 @@ from ai_asm.normalizer.pipeline import canonical_api_path
 from ai_asm.normalizer.url import templatize_path
 from ai_asm.shared.candidate_store import CandidateEndpoint
 
-API_PREFIX_RE = re.compile(r"/(?:api|rest|b2b|graphql)(?=[/?#]|$)", re.IGNORECASE)
+API_PREFIX_RE = re.compile(
+    r"/(?:api(?:[-_][a-z0-9]+)?|rest|b2b|graphql)(?=[/?#]|$)",
+    re.IGNORECASE,
+)
 API_URL_RE = re.compile(
-    r"""(?P<url>https?://[^"'`\s<>{}\\]+/(?:api|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*|https?://[^"'`\s<>{}\\]+/[^"'`\s<>{}\\]*?/(?:api|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*|/(?!/)[^"'`\s<>{}\\]*?/(?:api|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*|/(?:api|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*)""",
+    r"""(?P<url>https?://[^"'`\s<>{}\\]+/(?:api(?:[-_][a-z0-9]+)?|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*|https?://[^"'`\s<>{}\\]+/[^"'`\s<>{}\\]*?/(?:api(?:[-_][a-z0-9]+)?|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*|/(?!/)[^"'`\s<>{}\\]*?/(?:api(?:[-_][a-z0-9]+)?|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*|/(?:api(?:[-_][a-z0-9]+)?|rest|b2b|graphql)(?=[/?#]|$)[^"'`\s<>{}\\]*)""",
     re.IGNORECASE,
 )
 ANGLE_PLACEHOLDER_RE = re.compile(r"<[A-Za-z_$][\w$-]*>")
@@ -68,13 +71,14 @@ def candidate_from_url(
     base_url: str,
     scope: Scope,
     source_kind: str,
+    require_api_marker: bool = True,
 ) -> CandidateEndpoint | None:
     raw_url = sanitize_candidate_url(raw_url)
     absolute = urljoin(base_url, raw_url)
     if not scope.allows(absolute):
         return None
     parsed = urlparse(absolute)
-    if not _looks_api_path(parsed.path):
+    if require_api_marker and not _looks_api_path(parsed.path):
         return None
     return CandidateEndpoint(
         method=method.upper(),
@@ -103,6 +107,9 @@ def iter_static_endpoint_refs(body: str) -> list[StaticEndpointRef]:
     `host = this.hostServer + "/api/Products"` followed by
     `this.http.get(`${this.host}/${id}`)`.
     """
+    if not contains_api_marker(body):
+        return []
+
     refs: list[StaticEndpointRef] = []
     handled_spans: list[tuple[int, int]] = []
     global_env = _collect_api_assignments(body, allow_locals=False)
@@ -222,6 +229,23 @@ def _append_settings_call_ref(
 
 def _looks_api_path(path: str) -> bool:
     return API_PREFIX_RE.search(path) is not None
+
+
+def contains_api_marker(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "/api",
+            "/rest",
+            "/b2b",
+            "/graphql",
+            "api/",
+            "rest/",
+            "b2b/",
+            "graphql",
+        )
+    )
 
 
 def sanitize_candidate_url(url: str) -> str:

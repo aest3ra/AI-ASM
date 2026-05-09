@@ -23,7 +23,7 @@ scope:
     assert cfg.limits.max_pages == 200
     assert cfg.auth.type == "none"
     assert cfg.static_probe_auth == "cookie-only"
-    assert cfg.agent.mode == "mock"
+    assert cfg.agent.mode == "planner"
     assert cfg.agent.model == "gpt-5-mini"
     assert cfg.agent.temperature == 0.0
 

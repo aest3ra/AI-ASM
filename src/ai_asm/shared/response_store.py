@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from ai_asm.schema.inferrer import infer_schema_from_json_bodies
+
 
 @dataclass
 class ResponseSample:
@@ -48,8 +50,14 @@ class ResponseStore:
             return list(self._samples.get((method.upper(), url), []))
 
     async def schema_for(self, method: str, url: str) -> dict | None:
-        # Phase 6 owns actual schema inference. The store keeps the API stable.
-        return None
+        async with self._lock:
+            samples = list(self._samples.get((method.upper(), url), []))
+        bodies = [
+            sample.body
+            for sample in samples
+            if sample.body and _looks_like_json(sample)
+        ]
+        return infer_schema_from_json_bodies(bodies)
 
     async def sample_count(self, host: str | None = None) -> int:
         async with self._lock:
@@ -60,3 +68,10 @@ class ResponseStore:
                 for (_, url), samples in self._samples.items()
                 if f"://{host}" in url
             )
+
+
+def _looks_like_json(sample: ResponseSample) -> bool:
+    mime = (sample.mime or "").lower()
+    if "json" in mime:
+        return True
+    return bool(sample.body and sample.body.lstrip().startswith(("{", "[")))

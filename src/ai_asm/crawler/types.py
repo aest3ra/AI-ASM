@@ -96,7 +96,7 @@ class ScanDiagnostics:
     buttons_skipped_danger: int = 0
     forms_submitted: int = 0
     forms_skipped_password: int = 0
-    forms_skipped_other: int = 0  # danger + file + multipart
+    forms_skipped_other: int = 0  # danger or blocked submit controls
     static_gets_probed: int = 0
     static_get_probe_failures: int = 0
     static_probe_auth_profiles: int = 0

@@ -100,10 +100,37 @@ def test_is_api_capture_accepts_json_xhr_without_api_prefix():
     ))
 
 
+def test_is_api_capture_accepts_json_document_without_api_prefix():
+    assert is_api_capture(cap(
+        "GET",
+        "https://x/booking",
+        resource_type="Document",
+        response_mime="application/json",
+    ))
+
+
+def test_is_api_capture_accepts_plain_document_without_api_prefix():
+    assert is_api_capture(cap(
+        "GET",
+        "https://x/ping",
+        resource_type="Document",
+        response_mime="text/plain",
+    ))
+
+
 def test_is_api_capture_accepts_api_marker_below_service_prefix():
     assert is_api_capture(cap(
         "GET",
         "https://x/identity/api/auth/login",
         resource_type="XHR",
         response_mime="text/plain",
+    ))
+
+
+def test_is_api_capture_accepts_api_internal_without_response_mime():
+    assert is_api_capture(cap(
+        "POST",
+        "https://x/api-internal/apply-job?jobid=5148265008",
+        resource_type="Fetch",
+        response_mime=None,
     ))

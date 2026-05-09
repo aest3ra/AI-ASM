@@ -2,10 +2,11 @@ import asyncio
 
 from sqlmodel import Session, select
 
-from ai_asm.agent.client import AgentResponse, HeuristicMockLLMClient
+from ai_asm.agent.client import HeuristicMockLLMClient
 from ai_asm.agent.context import AgentMemory, NetworkDelta
 from ai_asm.agent.driver import (
     AgentObservation,
+    PlaywrightToolPage,
     _exploration_status,
     _form_status,
     _form_memory_key,
@@ -156,12 +157,203 @@ class NetworkRecordingPage(FakePage):
         return NetworkRecordingLocator(self, ref)
 
 
+class ButtonOnlyNetworkPage(NetworkRecordingPage):
+    async def evaluate(self, script, arg=None):
+        if "window.__aiAsmAgentRoutes" in script:
+            if "window.__aiAsmAgentRoutes || []" in script:
+                return []
+            return None
+        if "document.querySelectorAll" in script:
+            return {
+                "url": self.url,
+                "refs": [
+                    {
+                        "ref": "r1",
+                        "tag": "a",
+                        "text": "Open settings",
+                        "href": "/settings",
+                    },
+                ],
+            }
+        if "__aiAsmRequests" in script:
+            return []
+        return None
+
+
+class EmptyPage(FakePage):
+    async def evaluate(self, script, arg=None):
+        if "window.__aiAsmAgentRoutes" in script:
+            if "window.__aiAsmAgentRoutes || []" in script:
+                return []
+            return None
+        if "document.querySelectorAll" in script:
+            return {"url": self.url, "refs": []}
+        if "__aiAsmRequests" in script:
+            return []
+        return None
+
+
+class AmbiguousPage(FakePage):
+    async def evaluate(self, script, arg=None):
+        if "window.__aiAsmAgentRoutes" in script:
+            if "window.__aiAsmAgentRoutes || []" in script:
+                return []
+            return None
+        if "document.querySelectorAll" in script:
+            return {
+                "url": self.url,
+                "refs": [
+                    {
+                        "ref": "r1",
+                        "tag": "div",
+                        "role": "button",
+                        "text": "",
+                    },
+                ],
+            }
+        if "__aiAsmRequests" in script:
+            return []
+        return None
+
+
 class RedirectingFormPage(FakePage):
     async def evaluate(self, script, arg=None):
         if isinstance(arg, dict) and "data-ai-asm-ref" in script:
             self.actions.append(("submit_form", arg))
             return {"ok": False, "error": "redirected form response"}
         return await super().evaluate(script, arg)
+
+
+class FakeRequest:
+    def __init__(
+        self,
+        *,
+        method: str,
+        url: str,
+        resource_type: str = "fetch",
+        post_data: str = "",
+    ):
+        self.method = method
+        self.url = url
+        self.resource_type = resource_type
+        self.post_data = post_data
+        self.headers = {"content-type": "application/json"}
+
+
+class FakeRoute:
+    def __init__(self, request: FakeRequest):
+        self.request = request
+        self.events: list[str] = []
+
+    async def abort(self):
+        self.events.append("abort")
+
+    async def fallback(self):
+        self.events.append("fallback")
+
+    async def continue_(self):
+        self.events.append("continue")
+
+
+class DryRunRoutePage(FakePage):
+    def __init__(self):
+        super().__init__()
+        self.route_handler = None
+        self.route_calls: list[tuple[str, str]] = []
+
+    async def route(self, pattern, handler):
+        self.route_calls.append(("route", pattern))
+        self.route_handler = handler
+
+    async def unroute(self, pattern, handler):
+        self.route_calls.append(("unroute", pattern))
+        assert handler is self.route_handler
+        self.route_handler = None
+
+    async def wait_for_timeout(self, timeout):
+        self.route_calls.append(("wait", str(timeout)))
+
+    async def dispatch(self, request: FakeRequest) -> list[str]:
+        assert self.route_handler is not None
+        route = FakeRoute(request)
+        await self.route_handler(route)
+        return route.events
+
+
+class FileInputLocator(FakeLocator):
+    async def evaluate(self, script):
+        self.page.actions.append(("evaluate-file-inputs", self.ref))
+        return ["file-token"]
+
+    async def set_input_files(self, files):
+        self.page.actions.append(("set_input_files", self.ref, files))
+
+
+class FileInputPage(FakePage):
+    def locator(self, selector):
+        if "data-ai-asm-file-input" in selector:
+            return FileInputLocator(self, "file-token")
+        ref = selector.split('"')[1]
+        return FileInputLocator(self, ref)
+
+
+def test_playwright_tool_page_aborts_mutations_and_falls_back_for_gets():
+    async def run():
+        page = DryRunRoutePage()
+        adapter = PlaywrightToolPage(page, {"refs": []})
+
+        async def action():
+            post_events = await page.dispatch(FakeRequest(
+                method="POST",
+                url="https://example.com/api/save",
+                post_data='{"ok":true}',
+            ))
+            get_events = await page.dispatch(FakeRequest(
+                method="GET",
+                url="https://example.com/app.js",
+                resource_type="script",
+            ))
+            assert post_events == ["abort"]
+            assert get_events == ["fallback"]
+
+        captured = await adapter._capture_and_abort_mutations(action)
+
+        assert captured == [
+            {
+                "method": "POST",
+                "url": "https://example.com/api/save",
+                "resource_type": "fetch",
+                "content_type": "application/json",
+                "post_data_length": 11,
+                "aborted": True,
+            }
+        ]
+        assert adapter.last_aborted_mutations == captured
+        assert page.route_calls == [
+            ("route", "**/*"),
+            ("wait", "1000"),
+            ("unroute", "**/*"),
+        ]
+
+    asyncio.run(run())
+
+
+def test_playwright_tool_page_attaches_placeholder_file_inputs():
+    async def run():
+        page = FileInputPage()
+        adapter = PlaywrightToolPage(page, {"refs": []})
+
+        await adapter._attach_placeholder_files_for_ref("submit")
+
+        assert page.actions[0] == ("evaluate-file-inputs", "submit")
+        action, ref, files = page.actions[1]
+        assert action == "set_input_files"
+        assert ref == "file-token"
+        assert files[0]["name"] == "ai-asm-placeholder.txt"
+        assert files[0]["mimeType"] == "text/plain"
+        assert files[0]["buffer"] == b"ai-asm dry-run placeholder file"
+
+    asyncio.run(run())
 
 
 def test_mock_agent_driver_runs_snapshot_to_tool_executor_flow():
@@ -199,7 +391,7 @@ def test_agent_driver_logs_llm_failures(monkeypatch):
         trace = DecisionTrace(scan_id=1)
 
         stats = await run_agent_interactions(
-            FakePage(),
+            AmbiguousPage(),
             scope=Scope(ScopeConfig(include_domains=["example.com"])),
             mode="llm",
             trace=trace,
@@ -232,7 +424,7 @@ def test_agent_driver_records_llm_failure_flagged_item(monkeypatch, tmp_path):
             scan_id = scan.id
 
         await run_agent_interactions(
-            FakePage(),
+            AmbiguousPage(),
             scope=Scope(ScopeConfig(include_domains=["example.com"])),
             mode="llm",
             db_engine=engine,
@@ -242,6 +434,7 @@ def test_agent_driver_records_llm_failure_flagged_item(monkeypatch, tmp_path):
 
         with Session(engine) as session:
             rows = session.exec(select(FlaggedItem)).all()
+        assert rows
         assert rows[0].flag_kind == "agent_llm_failed"
         assert rows[0].item_kind == "llm_call"
         assert rows[0].auth_state_path == "auth.json"
@@ -274,34 +467,15 @@ def test_agent_driver_records_redirected_form_as_failed_tool():
     asyncio.run(run())
 
 
-def test_agent_driver_uses_cdp_network_buffer_for_action_delta(monkeypatch):
-    class ScriptedOpenAIClient:
-        def __init__(self, **kwargs):
-            self.calls = 0
-
-        async def complete(self, context):
-            self.calls += 1
-            if self.calls == 1:
-                return AgentResponse(
-                    tool_calls=[
-                        ToolCall(id="c1", name="click_ref", arguments={"ref": "r1"})
-                    ],
-                )
-            return AgentResponse(
-                tool_calls=[
-                    ToolCall(id="c2", name="give_up", arguments={"reason": "done"})
-                ],
-            )
-
+def test_agent_driver_uses_cdp_network_buffer_for_planner_action_delta():
     async def run():
-        monkeypatch.setattr("ai_asm.agent.driver.OpenAIClient", ScriptedOpenAIClient)
         network_events = NetworkEventBuffer()
         trace = DecisionTrace(scan_id=1)
 
         await run_agent_interactions(
-            NetworkRecordingPage(network_events),
+            ButtonOnlyNetworkPage(network_events),
             scope=Scope(ScopeConfig(include_domains=["example.com"])),
-            mode="llm",
+            mode="planner",
             max_steps=2,
             network_events=network_events,
             trace=trace,
@@ -483,6 +657,51 @@ def test_visible_forms_prefers_field_own_type_over_form_input_types():
     forms = _visible_forms_from_snapshot(snapshot, FormDataSet())
 
     assert forms[0]["fields"][0]["type"] == "password"
+
+
+def test_visible_forms_uses_select_options_without_type_ref_fill_value():
+    snapshot = {
+        "url": "https://example.com/search",
+        "refs": [
+            {
+                "ref": "s1",
+                "tag": "select",
+                "type": "select",
+                "name": "category",
+                "text": "Category",
+                "form_method": "GET",
+                "form_action": "https://example.com/search",
+                "options": [
+                    {"value": "", "label": "Choose"},
+                    {"value": "title", "label": "Title"},
+                ],
+            },
+            {
+                "ref": "q1",
+                "tag": "input",
+                "type": "text",
+                "name": "q",
+                "text": "Search",
+                "form_method": "GET",
+                "form_action": "https://example.com/search",
+            },
+        ],
+    }
+
+    forms = _visible_forms_from_snapshot(snapshot, FormDataSet())
+
+    assert forms[0]["fields"][0] == {
+        "ref": "s1",
+        "tag": "select",
+        "type": "select",
+        "name": "category",
+        "placeholder": "Category",
+        "test_value": "title",
+        "options": [
+            {"value": "", "label": "Choose"},
+            {"value": "title", "label": "Title"},
+        ],
+    }
 
 
 def test_exploration_status_marks_empty_state_for_give_up():

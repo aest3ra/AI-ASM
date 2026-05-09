@@ -57,15 +57,24 @@ class FormDataSet:
         return values
 
     def value_for_field(self, field: dict[str, Any]) -> str:
-        for key in _field_lookup_keys(field):
-            if key in self.fields:
-                return self.fields[key]
+        configured = self.configured_value_for_field(field)
+        if configured is not None:
+            return configured
+        semantic_type = _semantic_default_type(field)
+        if semantic_type and semantic_type in self.defaults:
+            return self.defaults[semantic_type]
         field_type = str(field.get("type") or field.get("tag") or "text").lower()
         if field_type in self.defaults:
             return self.defaults[field_type]
         if str(field.get("tag") or "").lower() == "textarea":
             return self.defaults.get("textarea", DEFAULT_VALUES["textarea"])
         return self.defaults.get("text", DEFAULT_VALUES["text"])
+
+    def configured_value_for_field(self, field: dict[str, Any]) -> str | None:
+        for key in _field_lookup_keys(field):
+            if key in self.fields:
+                return self.fields[key]
+        return None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -81,6 +90,17 @@ def _field_lookup_keys(field: dict[str, Any]) -> list[str]:
         if value:
             keys.append(value)
     return keys
+
+
+def _semantic_default_type(field: dict[str, Any]) -> str:
+    haystack = " ".join(_field_lookup_keys(field))
+    if any(marker in haystack for marker in ("email", "e-mail", "mail")):
+        return "email"
+    if any(marker in haystack for marker in ("phone", "tel", "mobile", "cell")):
+        return "tel"
+    if any(marker in haystack for marker in ("url", "website", "linkedin", "portfolio")):
+        return "url"
+    return ""
 
 
 def _string_map(value: dict[str, Any]) -> dict[str, str]:

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -16,6 +19,12 @@ from sqlmodel import Session, select
 from ai_asm.config import AgentMode, AuthConfig, StaticProbeAuthMode, load_config
 from ai_asm.crawler.scope import Scope
 from ai_asm.output.console import print_scan_result
+from ai_asm.output.flagged import (
+    SUPPORTED_FLAGGED_FORMATS,
+    load_flagged_items,
+    render_flagged_items,
+)
+from ai_asm.output.openapi import openapi_from_db, openapi_to_yaml, write_openapi_yaml
 from ai_asm.scan.orchestrator import ScanOrchestrator, find_resume_scan
 from ai_asm.storage.db import Endpoint, Parameter, Scan, open_db
 
@@ -25,8 +34,21 @@ app = typer.Typer(no_args_is_help=True, add_completion=False)
 @app.command()
 def scan(
     config_path: Path = typer.Argument(..., exists=True, readable=True),
-    db_path: Path = typer.Option(Path("asm.db"), "--db"),
-    out_dir: Path = typer.Option(Path("captures"), "--out"),
+    db_path: Path | None = typer.Option(
+        None,
+        "--db",
+        help=(
+            "SQLite DB path. Defaults to a new runs/<timestamp>_<host>_<hash>.db "
+            "per scan."
+        ),
+    ),
+    out_dir: Path | None = typer.Option(
+        None,
+        "--out",
+        help=(
+            "Artifact directory. Defaults to the generated or explicit DB stem."
+        ),
+    ),
     auth: Path | None = typer.Option(
         None,
         "--auth",
@@ -62,7 +84,11 @@ def scan(
     agent: str | None = typer.Option(
         None,
         "--agent",
-        help="Browser agent mode: mock or llm. Defaults to config.agent.mode.",
+        help=(
+            "Browser agent mode: planner, mock, or llm. "
+            "planner is the default; mock is legacy/debug only. "
+            "Defaults to config.agent.mode."
+        ),
     ),
     model: str | None = typer.Option(
         None,
@@ -112,10 +138,13 @@ def scan(
     if form_data is not None:
         config.agent.form_data_path = form_data
 
-    if resume is not None:
-        db_path = resume
-
     target = str(config.target)
+    db_path, out_dir = _resolve_scan_paths(
+        target,
+        db_path=db_path,
+        out_dir=out_dir,
+        resume=resume,
+    )
     scope = Scope(config.scope)
     auth_state_path = _auth_state_path(config.auth)
 
@@ -132,6 +161,8 @@ def scan(
         f"temperature={config.agent.temperature if config.agent.mode == 'llm' else '-'} "
         f"agent_budget={config.agent.max_steps_per_page} "
         f"form_data={config.agent.form_data_path or 'builtin'} "
+        f"db={db_path} "
+        f"out={out_dir} "
         f"({'headless' if headless else 'headed'})"
         f"{' resume=' + str(db_path) if resume is not None else ''}"
     )
@@ -166,6 +197,8 @@ def scan(
         max_visits_per_template=config.limits.max_visits_per_template,
         only_dynamic=only_dynamic,
     )
+    outputs = _write_default_scan_outputs(result.db_path, result.raw_path.parent)
+    _print_default_scan_outputs(outputs)
 
 
 def _find_resume_scan(
@@ -180,6 +213,87 @@ def _auth_state_path(auth: AuthConfig) -> str | None:
     if auth.type == "storage_state" and auth.storage_state_path:
         return str(auth.storage_state_path)
     return None
+
+
+def _resolve_scan_paths(
+    target: str,
+    *,
+    db_path: Path | None,
+    out_dir: Path | None,
+    resume: Path | None,
+) -> tuple[Path, Path]:
+    if resume is not None:
+        resolved_db = resume
+    elif db_path is not None:
+        resolved_db = db_path
+    else:
+        resolved_db = _default_db_path(target)
+
+    resolved_out = out_dir if out_dir is not None else _artifact_dir_for_db(resolved_db)
+    return resolved_db, resolved_out
+
+
+def _artifact_dir_for_db(db_path: Path) -> Path:
+    if db_path.suffix:
+        return db_path.with_suffix("")
+    return db_path.parent / f"{db_path.name}-artifacts"
+
+
+def _default_db_path(target: str, *, root: Path = Path("runs")) -> Path:
+    return root / f"{_timestamp_for_filename()}_{_host_slug(target)}_{_url_hash(target)}.db"
+
+
+def _timestamp_for_filename() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def _host_slug(target: str) -> str:
+    parsed = urlparse(target)
+    host = parsed.hostname or "target"
+    port = f"-{parsed.port}" if parsed.port else ""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", f"{host}{port}").strip("-").lower()
+    return slug or "target"
+
+
+def _url_hash(target: str) -> str:
+    return hashlib.sha256(target.encode("utf-8")).hexdigest()[:6]
+
+
+def _write_default_scan_outputs(db_path: Path, out_dir: Path) -> dict[str, Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    outputs = {
+        "openapi": out_dir / "api.yaml",
+        "flagged_yaml": out_dir / "flagged.yaml",
+        "flagged_curl": out_dir / "flagged.sh",
+    }
+
+    write_openapi_yaml(outputs["openapi"], openapi_from_db(db_path))
+    flagged_items = load_flagged_items(db_path)
+    outputs["flagged_yaml"].write_text(
+        render_flagged_items(flagged_items, "yaml"),
+        encoding="utf-8",
+    )
+    outputs["flagged_curl"].write_text(
+        render_flagged_items(flagged_items, "curl"),
+        encoding="utf-8",
+    )
+    try:
+        outputs["flagged_curl"].chmod(
+            outputs["flagged_curl"].stat().st_mode | 0o111,
+        )
+    except OSError:
+        pass
+    return outputs
+
+
+def _print_default_scan_outputs(outputs: dict[str, Path]) -> None:
+    table = Table(title="Generated outputs", show_header=False)
+    table.add_column("kind", style="bold")
+    table.add_column("path", overflow="fold")
+    table.add_row("openapi", str(outputs["openapi"]))
+    table.add_row("flagged yaml", str(outputs["flagged_yaml"]))
+    table.add_row("flagged curl", str(outputs["flagged_curl"]))
+    print(table)
 
 
 def _parse_static_probe_auth(value: str) -> StaticProbeAuthMode:
@@ -197,7 +311,7 @@ def _parse_static_probe_auth(value: str) -> StaticProbeAuthMode:
 
 
 def _parse_agent_mode(value: str) -> AgentMode:
-    allowed = {"mock", "llm"}
+    allowed = {"planner", "mock", "llm"}
     normalized = value.strip().lower()
     if normalized not in allowed:
         typer.secho(
@@ -218,6 +332,81 @@ def _display_route(url: str | None) -> str:
     if parsed.fragment:
         path = f"{path}#{parsed.fragment}"
     return path
+
+
+@app.command("export")
+def export_openapi(
+    db_path: Path = typer.Argument(..., exists=True, readable=True),
+    out: Path | None = typer.Option(None, "-o", "--out"),
+    scan_id: int | None = typer.Option(
+        None,
+        "--scan",
+        help="Only export endpoints last observed in this scan.",
+    ),
+    title: str = typer.Option("ai-asm export", "--title"),
+) -> None:
+    """Export accumulated endpoints as OpenAPI 3.0 YAML."""
+    spec = openapi_from_db(db_path, scan_id=scan_id, title=title)
+    if out is None:
+        typer.echo(openapi_to_yaml(spec))
+        return
+    write_openapi_yaml(out, spec)
+    print(f"[green]✓[/green] wrote OpenAPI YAML to {out}")
+
+
+@app.command()
+def flagged(
+    db_path: Path = typer.Argument(..., exists=True, readable=True),
+    kind: str | None = typer.Option(None, "--kind"),
+    scan_id: int | None = typer.Option(None, "--scan"),
+    export_format: str | None = typer.Option(
+        None,
+        "--export",
+        help="Export format: curl, http, postman, or yaml.",
+    ),
+    out: Path | None = typer.Option(None, "-o", "--out"),
+) -> None:
+    """Show or export items that ai-asm detected but did not auto-test."""
+    items = load_flagged_items(db_path, kind=kind, scan_id=scan_id)
+    if export_format is not None:
+        normalized = export_format.lower()
+        if normalized not in SUPPORTED_FLAGGED_FORMATS:
+            typer.secho(
+                f"invalid --export {export_format!r}; expected one of: "
+                f"{', '.join(sorted(SUPPORTED_FLAGGED_FORMATS))}",
+                fg="red",
+                err=True,
+            )
+            raise typer.Exit(1)
+        rendered = render_flagged_items(items, normalized)
+        if out is None:
+            typer.echo(rendered)
+        else:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(rendered, encoding="utf-8")
+            print(f"[green]✓[/green] wrote flagged {normalized} export to {out}")
+        return
+
+    if not items:
+        print("[dim]no flagged items found[/dim]")
+        return
+    table = Table(title="Flagged Items", show_header=True, header_style="bold")
+    table.add_column("id", justify="right")
+    table.add_column("scan", justify="right")
+    table.add_column("kind")
+    table.add_column("method")
+    table.add_column("url", overflow="fold")
+    table.add_column("description", overflow="fold")
+    for item in items:
+        table.add_row(
+            str(item.id or ""),
+            str(item.scan_id),
+            item.flag_kind,
+            item.method or "-",
+            item.url or "-",
+            item.description or "-",
+        )
+    print(table)
 
 
 @app.command()

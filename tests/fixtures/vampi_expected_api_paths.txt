@@ -1,0 +1,14 @@
+# VAmPI documented API paths.
+# Source: VAmPI Docker Hub/GitHub route table and bundled OpenAPI spec.
+/
+/createdb
+/me
+/users/v1
+/users/v1/_debug
+/users/v1/register
+/users/v1/login
+/users/v1/{username}
+/users/v1/{username}/email
+/users/v1/{username}/password
+/books/v1
+/books/v1/{book}

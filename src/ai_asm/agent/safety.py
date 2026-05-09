@@ -18,6 +18,25 @@ DANGER_KEYWORDS = {
     "삭제",
 }
 
+
+def classify_form_text(text: str) -> str:
+    lowered = text.lower()
+    if "register" in lowered or "sign up" in lowered or "가입" in lowered:
+        return "register"
+    if "signup" in lowered or "sign-up" in lowered:
+        return "register"
+    if (
+        "password" in lowered
+        or "login" in lowered
+        or "sign in" in lowered
+        or "로그인" in lowered
+    ):
+        return "login"
+    if "search" in lowered or "query" in lowered or "검색" in lowered:
+        return "search"
+    return "form"
+
+
 def is_click_candidate(info: dict[str, Any]) -> bool:
     tag = str(info.get("tag") or "").lower()
     role = str(info.get("role") or "").lower()
@@ -58,6 +77,14 @@ def matched_keyword(text: str, keywords: set[str]) -> str | None:
         if keyword.lower() in lowered:
             return keyword
     return None
+
+
+def safe_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Return tool arguments safe for trace/log output."""
+    safe = dict(arguments)
+    if tool_name == "type_ref" and "text" in safe:
+        safe["text"] = f"<redacted len={len(str(safe['text']))}>"
+    return safe
 
 
 def _danger_text(info: dict[str, Any]) -> str:

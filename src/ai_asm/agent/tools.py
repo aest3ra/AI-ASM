@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from urllib.parse import urljoin, urlparse
 
 from sqlmodel import Session
 
@@ -11,6 +12,7 @@ from ai_asm.agent.budget import BudgetExceeded, BudgetTracker
 from ai_asm.agent.safety import (
     label_for_ref,
     matched_danger_keyword,
+    safe_tool_arguments,
 )
 from ai_asm.crawler.scope import Scope
 from ai_asm.shared.decision_trace import DecisionTrace
@@ -19,6 +21,7 @@ from ai_asm.storage.repo import record_flagged_item
 ToolName = Literal[
     "click_ref",
     "type_ref",
+    "select_ref",
     "navigate",
     "submit_form",
     "scroll",
@@ -52,6 +55,7 @@ class ToolSpec:
 TOOL_SPECS = [
     ToolSpec("click_ref", "Click an element by snapshot ref.", ("ref",)),
     ToolSpec("type_ref", "Type text into an element by snapshot ref.", ("ref", "text")),
+    ToolSpec("select_ref", "Select an option in a select element by snapshot ref.", ("ref", "value")),
     ToolSpec("navigate", "Navigate to an in-scope URL.", ("url",)),
     ToolSpec("submit_form", "Submit a form by snapshot ref.", ("ref",)),
     ToolSpec("scroll", "Scroll the page.", ()),
@@ -122,6 +126,8 @@ class ToolExecutor:
                 return await self._click_ref(call)
             if call.name == "type_ref":
                 return await self._type_ref(call)
+            if call.name == "select_ref":
+                return await self._select_ref(call)
             if call.name == "submit_form":
                 return await self._submit_form(call)
             if call.name == "scroll":
@@ -168,14 +174,50 @@ class ToolExecutor:
                 context={"ref": ref, "matched_keyword": matched, "label": label},
                 error="rejected: blacklist",
             )
-        await self.page.click_ref(ref)
-        return await self._ok(call, {"ref": ref})
+        try:
+            await self.page.click_ref(ref)
+            data = {"ref": ref}
+            _add_aborted_mutations(data, self.page)
+            return await self._ok(call, data)
+        except Exception as exc:
+            fallback_url = _fallback_href(self.page_url, info)
+            if not fallback_url:
+                raise
+            if not self.scope.allows(fallback_url):
+                return await self._reject(
+                    call,
+                    flag_kind="agent_scope",
+                    item_kind="click",
+                    url=fallback_url,
+                    description=(
+                        "Click fallback rejected out of scope: "
+                        f"{fallback_url}"
+                    ),
+                    context={"ref": ref, "label": label, "href": fallback_url},
+                    error="rejected: out of scope",
+                )
+            await self.page.navigate(fallback_url)
+            return await self._ok(
+                call,
+                {
+                    "ref": ref,
+                    "fallback": "navigate",
+                    "url": fallback_url,
+                    "click_error": type(exc).__name__,
+                },
+            )
 
     async def _type_ref(self, call: ToolCall) -> ToolResult:
         ref = str(call.arguments.get("ref") or "")
         text = str(call.arguments.get("text") or "")
         await self.page.type_ref(ref, text)
         return await self._ok(call, {"ref": ref})
+
+    async def _select_ref(self, call: ToolCall) -> ToolResult:
+        ref = str(call.arguments.get("ref") or "")
+        value = str(call.arguments.get("value") or "")
+        await self.page.select_ref(ref, value)
+        return await self._ok(call, {"ref": ref, "value": value})
 
     async def _submit_form(self, call: ToolCall) -> ToolResult:
         ref = str(call.arguments.get("ref") or "")
@@ -196,7 +238,9 @@ class ToolExecutor:
                 error="rejected: out of scope",
             )
         await self.page.submit_form(ref)
-        return await self._ok(call, {"ref": ref})
+        data = {"ref": ref}
+        _add_aborted_mutations(data, self.page)
+        return await self._ok(call, data)
 
     async def _scroll(self, call: ToolCall) -> ToolResult:
         direction = str(call.arguments.get("direction") or "down")
@@ -328,10 +372,7 @@ class ToolExecutor:
 
 
 def _safe_arguments(call: ToolCall) -> dict[str, Any]:
-    safe = dict(call.arguments)
-    if call.name == "type_ref" and "text" in safe:
-        safe["text"] = f"<redacted len={len(str(safe['text']))}>"
-    return safe
+    return safe_tool_arguments(call.name, call.arguments)
 
 
 def _missing_required_args(call: ToolCall) -> list[str]:
@@ -342,6 +383,26 @@ def _missing_required_args(call: ToolCall) -> list[str]:
         if value is None or str(value) == "":
             missing.append(name)
     return missing
+
+
+def _add_aborted_mutations(data: dict[str, Any], page) -> None:
+    mutations = getattr(page, "last_aborted_mutations", None)
+    if isinstance(mutations, list) and mutations:
+        data["aborted_mutations"] = mutations
+
+
+def _fallback_href(page_url: str | None, info: dict[str, Any]) -> str | None:
+    href = str(info.get("href") or "").strip()
+    if not href or href.startswith("#"):
+        return None
+    lowered = href.lower()
+    if lowered.startswith(("mailto:", "tel:", "javascript:", "data:")):
+        return None
+    resolved = urljoin(page_url or "", href)
+    parsed = urlparse(resolved)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return resolved
 
 
 def _short_value(value: Any, *, limit: int = 160) -> str:

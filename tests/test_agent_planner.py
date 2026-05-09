@@ -29,6 +29,37 @@ def test_local_planner_fills_visible_form_then_clicks_submit():
     assert actions[0].arguments["text"] == "user@example.com"
 
 
+def test_local_planner_uses_select_ref_for_select_fields():
+    actions = plan_local_actions({
+        "visible_forms": [
+            {
+                "memory_key": "search:GET:https://example.com/search",
+                "fields": [
+                    {
+                        "ref": "kind",
+                        "tag": "select",
+                        "test_value": "title",
+                    },
+                    {"ref": "q", "tag": "input", "test_value": "term"},
+                ],
+                "submit_candidates": [{"ref": "search", "label": "Search"}],
+            },
+        ],
+        "memory": {"attempted_forms": []},
+    })
+
+    assert [action.name for action in actions] == [
+        "select_ref",
+        "type_ref",
+        "click_ref",
+    ]
+    assert actions[0].arguments == {
+        "ref": "kind",
+        "value": "title",
+        "reason": "select visible form option with configured test data",
+    }
+
+
 def test_local_planner_uses_submit_form_for_post_form_without_submit_button():
     actions = plan_local_actions({
         "visible_forms": [
@@ -69,7 +100,7 @@ def test_local_planner_scrolls_after_filling_form_without_visible_submit():
     ]
 
 
-def test_local_planner_submits_typed_form_when_submit_becomes_visible():
+def test_local_planner_fills_remaining_fields_and_submits_typed_form():
     actions = plan_local_actions({
         "visible_forms": [
             {
@@ -78,6 +109,29 @@ def test_local_planner_submits_typed_form_when_submit_becomes_visible():
                     {"ref": "email", "test_value": "user@example.com"},
                     {"ref": "password", "test_value": "secret"},
                 ],
+                "submit_candidates": [{"ref": "login", "label": "Login"}],
+            },
+        ],
+        "memory": {
+            "attempted_forms": [],
+            "forms_with_typed_fields": ["login::https://example.com/#/login"],
+        },
+    })
+
+    assert [action.name for action in actions] == ["type_ref", "type_ref", "click_ref"]
+    assert [action.arguments["ref"] for action in actions] == [
+        "email",
+        "password",
+        "login",
+    ]
+
+
+def test_local_planner_submits_typed_form_when_no_fields_remain():
+    actions = plan_local_actions({
+        "visible_forms": [
+            {
+                "memory_key": "login::https://example.com/#/login",
+                "fields": [],
                 "submit_candidates": [{"ref": "login", "label": "Login"}],
             },
         ],

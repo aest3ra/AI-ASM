@@ -29,6 +29,7 @@ def print_scan_result(
         only_dynamic,
     )
     print_repeated_api_requests(result.scoped_captured)
+    print_url_surface_summary(result.url_surfaces)
     print_diagnostics(result.diagnostics, max_visits_per_template)
     print_dispatcher_stats(result.dispatcher.stats, result.pending_candidates)
     print_static_candidates(result.static_candidates, result.endpoints)
@@ -107,7 +108,7 @@ def print_diagnostics(diag: ScanDiagnostics, cap: int) -> None:
     table.add_row("buttons skipped (danger)", str(diag.buttons_skipped_danger))
     table.add_row("POST forms submitted", str(diag.forms_submitted))
     table.add_row("POST forms skipped (password)", str(diag.forms_skipped_password))
-    table.add_row("POST forms skipped (danger/file)", str(diag.forms_skipped_other))
+    table.add_row("POST forms skipped (danger/blocked)", str(diag.forms_skipped_other))
     table.add_row("static GET candidates probed", str(diag.static_gets_probed))
     table.add_row("static GET probe failures", str(diag.static_get_probe_failures))
     table.add_row("static probe auth profiles", str(diag.static_probe_auth_profiles))
@@ -154,6 +155,27 @@ def print_repeated_api_requests(captured: list[CapturedRequest]) -> None:
     table.add_column("url", overflow="fold")
     for url, count in repeated:
         table.add_row(str(count), url)
+    print(table)
+
+
+def print_url_surface_summary(surfaces) -> None:
+    if not surfaces:
+        return
+    counts = Counter(surface.route_kind for surface in surfaces)
+    table = Table(title="URL surface classification", show_header=False)
+    table.add_column("kind", style="bold")
+    table.add_column("count", justify="right")
+    for kind in (
+        "api_endpoint",
+        "action_route",
+        "page_route",
+        "file",
+        "asset",
+        "unknown",
+    ):
+        count = counts.get(kind, 0)
+        if count:
+            table.add_row(kind, str(count))
     print(table)
 
 

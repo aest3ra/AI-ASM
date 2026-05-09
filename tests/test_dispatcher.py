@@ -66,6 +66,79 @@ def test_dispatcher_extracts_static_candidates_from_js():
     asyncio.run(run())
 
 
+def test_dispatcher_does_not_import_openapi_documents_as_static_candidates():
+    async def run():
+        dispatcher, candidates, _, _ = _dispatcher()
+
+        await dispatcher.dispatch_capture(_cap(
+            url="https://example.com/openapi.json",
+            mime="application/json",
+            body="""
+            {
+                "openapi": "3.0.0",
+                "paths": {
+                    "/users/v1": {"get": {}}
+                }
+            }
+            """,
+        ))
+
+        return await candidates.top_n(10)
+
+    found = asyncio.run(run())
+    assert found == []
+
+
+def test_dispatcher_extracts_prefixless_candidates_from_api_docs_html():
+    async def run():
+        dispatcher, candidates, _, _ = _dispatcher()
+
+        await dispatcher.dispatch_capture(_cap(
+            url="https://example.com/apidoc/index.html",
+            mime="text/html",
+            body="""
+            <h1>API docs</h1>
+            <p>GET /booking</p>
+            <p>GET /booking/1</p>
+            <p>POST /auth</p>
+            """,
+        ))
+
+        return await candidates.top_n(10)
+
+    found = asyncio.run(run())
+    assert {(c.method, c.path_template) for c in found} == {
+        ("GET", "/booking"),
+        ("GET", "/booking/{id}"),
+        ("POST", "/auth"),
+    }
+
+
+def test_dispatcher_extracts_html_form_actions_and_action_links():
+    async def run():
+        dispatcher, candidates, _, _ = _dispatcher()
+
+        await dispatcher.dispatch_capture(_cap(
+            url="https://example.com/ko/index.do",
+            mime="text/html",
+            body="""
+            <a href="/ko/about/history.do">History</a>
+            <a href="/cms/etcResourceOpen.do?site=ko">Resource</a>
+            <form method="GET" action="/ko/search/result.do">
+              <input name="q">
+            </form>
+            """,
+        ))
+
+        return await candidates.top_n(10)
+
+    found = asyncio.run(run())
+    assert {(c.method, c.path_template) for c in found} == {
+        ("GET", "/cms/etcResourceOpen.do"),
+        ("GET", "/ko/search/result.do"),
+    }
+
+
 def test_dispatcher_extracts_composed_angular_http_candidates():
     async def run():
         dispatcher, candidates, _, _ = _dispatcher()
@@ -214,5 +287,23 @@ def test_dispatcher_dispatch_many_applies_queue_backpressure():
         await dispatcher.dispatch_many(caps, page_url="https://example.com/")
 
         assert dispatcher.stats.rejected["track1_queue_full"] > 0
+
+    asyncio.run(run())
+
+
+def test_dispatcher_skips_vendor_js_without_api_markers_quickly():
+    async def run():
+        dispatcher, candidates, _, _ = _dispatcher(
+            same_url_min_interval_sec=0,
+        )
+        vendor_body = "function ajax(){};" * 50_000
+
+        await asyncio.wait_for(
+            dispatcher.dispatch_capture(_cap(body=vendor_body)),
+            timeout=1,
+        )
+
+        assert dispatcher.stats.accepted == 1
+        assert await candidates.pending_count() == 0
 
     asyncio.run(run())

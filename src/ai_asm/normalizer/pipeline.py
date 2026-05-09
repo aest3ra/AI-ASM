@@ -11,8 +11,11 @@ from ai_asm.normalizer.types import NormalizedEndpoint, NormalizedParameter
 from ai_asm.normalizer.url import templatize_path
 
 MAX_SAMPLES_PER_PARAM = 5
-API_PREFIXES = ("/api", "/rest", "/graphql", "/b2b")
-API_MARKER_RE = re.compile(r"/(?:api|rest|graphql|b2b)(?=/|$)", re.IGNORECASE)
+API_PREFIXES = ("/api", "/api-", "/api_", "/rest", "/graphql", "/b2b")
+API_MARKER_RE = re.compile(
+    r"/(?:api(?:[-_][a-z0-9]+)?|rest|graphql|b2b)(?=/|$)",
+    re.IGNORECASE,
+)
 STATIC_PATH_PREFIXES = ("/assets/", "/media/")
 STATIC_SUFFIXES = (
     ".js",
@@ -89,7 +92,16 @@ def is_api_capture(req: CapturedRequest) -> bool:
     if API_MARKER_RE.search(lowered):
         return True
     mime = (req.response_mime or "").lower()
-    return req.resource_type in {"XHR", "Fetch"} and "json" in mime
+    if "json" in mime:
+        return True
+    if req.resource_type in {"XHR", "Fetch"} and "json" in mime:
+        return True
+    return (
+        req.resource_type == "Document"
+        and mime.startswith("text/plain")
+        and lowered != "/"
+        and "." not in lowered.rsplit("/", 1)[-1]
+    )
 
 
 def canonical_api_path(path: str) -> str:

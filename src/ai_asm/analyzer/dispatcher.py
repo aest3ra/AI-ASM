@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 from urllib.parse import urlparse
 
-from ai_asm.analyzer import html, inline, js_ast, manifest
+from ai_asm.analyzer import docs, html, inline, js_ast, manifest
 from ai_asm.crawler.scope import Scope
 from ai_asm.crawler.types import CapturedRequest
 from ai_asm.shared.candidate_store import CandidateEndpoint, CandidateStore
@@ -198,14 +198,17 @@ class AnalyzerDispatcher:
             return [
                 *html.extract_candidates(body, base_url=cap.url, scope=self.scope),
                 *inline.extract_candidates(body, base_url=cap.url, scope=self.scope),
+                *docs.extract_candidates(body, base_url=cap.url, scope=self.scope),
             ]
         if kind == "json":
-            return js_ast.extract_candidates(
-                body,
-                base_url=cap.url,
-                scope=self.scope,
-                source_kind="static_inline",
-            )
+            return [
+                *js_ast.extract_candidates(
+                    body,
+                    base_url=cap.url,
+                    scope=self.scope,
+                    source_kind="static_inline",
+                ),
+            ]
         if _looks_manifest(cap.url):
             return manifest.extract_candidates(
                 body,

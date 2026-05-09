@@ -8,6 +8,7 @@ returns counters describing what happened.
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from typing import Any, Awaitable, Callable
 from urllib.parse import urljoin, urlparse
 
@@ -179,6 +180,11 @@ async def capture_page(
             links = await extract_links(page)
         except Exception:
             links = []
+    dom_snapshot_cap = await _collect_dom_snapshot_capture(
+        page,
+        page_url=url,
+        existing=captured.values(),
+    )
 
     if interact:
         try:
@@ -207,30 +213,97 @@ async def capture_page(
         captured[cap.request_id] = cap
 
     await _fill_response_bodies(client, captured)
+    if dom_snapshot_cap is not None:
+        captured[dom_snapshot_cap.request_id] = dom_snapshot_cap
     if analyzer_dispatcher is not None:
-        await _dispatch_captures(analyzer_dispatcher, captured.values(), page_url=url)
+        await _dispatch_captures(analyzer_dispatcher, list(captured.values()), page_url=url)
 
     diag.body_fetch_failures = sum(
-        1 for c in captured.values() if c.body_fetch_error
+        1 for c in list(captured.values()) if c.body_fetch_error
     )
 
-    await page.close()
+    await _close_page_safely(page, client)
     return list(captured.values()), _dedupe_links(links), diag
 
 
+async def _collect_dom_snapshot_capture(
+    page,
+    *,
+    page_url: str,
+    existing,
+) -> CapturedRequest | None:
+    current_url = page.url or page_url
+    for cap in existing:
+        if (
+            cap.url == current_url
+            and cap.resource_type == "Document"
+            and cap.response_body
+            and not cap.body_fetch_error
+        ):
+            return None
+    try:
+        body = await page.content()
+    except Exception:
+        return None
+    if not body:
+        return None
+    return CapturedRequest(
+        request_id=f"dom-snapshot:{current_url}",
+        method="GET",
+        url=current_url,
+        resource_type="Document",
+        page_url=page_url,
+        source="dom_snapshot",
+        response_status=200,
+        response_mime="text/html",
+        response_body=body[:HTML_MAX_BODY_BYTES],
+        response_body_truncated=len(body) > HTML_MAX_BODY_BYTES,
+    )
+
+
+async def _close_page_safely(page, client, *, timeout_sec: float = 3.0) -> None:
+    with suppress(Exception):
+        await asyncio.wait_for(client.detach(), timeout=timeout_sec)
+    with suppress(Exception):
+        await asyncio.wait_for(page.close(), timeout=timeout_sec)
+
+
 async def _route_with_scope(route, scope: Scope, diag: PageDiagnostics) -> None:
-    if should_abort_request(route.request.url, scope):
+    if should_abort_request(
+        route.request.url,
+        scope,
+        resource_type=route.request.resource_type,
+    ):
         diag.out_of_scope_requests_aborted += 1
         await route.abort()
         return
     await route.continue_()
 
 
-def should_abort_request(url: str, scope: Scope) -> bool:
+def should_abort_request(
+    url: str,
+    scope: Scope,
+    *,
+    resource_type: str | None = None,
+) -> bool:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return False
-    return not scope.allows(url)
+    if scope.allows(url):
+        return False
+    return not _is_passive_dependency(resource_type)
+
+
+def _is_passive_dependency(resource_type: str | None) -> bool:
+    return (resource_type or "").lower() in {
+        "script",
+        "stylesheet",
+        "image",
+        "font",
+        "media",
+        "texttrack",
+        "manifest",
+    }
 
 
 class InitScriptCaptures:
@@ -327,7 +400,9 @@ def _dedupe_links(links: list[str]) -> list[str]:
 async def _fill_response_bodies(
     client, captured: dict[str, CapturedRequest]
 ) -> None:
-    for rid, cap in captured.items():
+    # Network callbacks may still append requests while a navigation settles.
+    # Iterate over a stable snapshot so late requests do not abort the page.
+    for rid, cap in list(captured.items()):
         if cap.response_status is None:
             continue
         try:

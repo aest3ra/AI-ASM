@@ -42,13 +42,22 @@ AGENT_SNAPSHOT_SCRIPT = """
         "a[href]", "button", "input:not([type=hidden])", "textarea", "select",
         "form", "[role=button]", "[role=tab]", "[role=menuitem]"
     ].join(",");
-    const visible = (el) => {
+    const visibleOnPage = (el) => {
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
         return style && style.visibility !== "hidden" && style.display !== "none" &&
-            rect.width > 0 && rect.height > 0 &&
+            rect.width > 0 && rect.height > 0;
+    };
+    const inViewport = (el) => {
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 &&
             rect.bottom >= 0 && rect.right >= 0 &&
             rect.top <= window.innerHeight && rect.left <= window.innerWidth;
+    };
+    const formRelated = (el) => {
+        const tag = el.tagName.toLowerCase();
+        return tag === "form" || tag === "input" || tag === "textarea" ||
+            tag === "select" || !!el.closest("form");
     };
     const labelFor = (el) => (
         el.getAttribute("aria-label") ||
@@ -63,6 +72,7 @@ AGENT_SNAPSHOT_SCRIPT = """
     }
     const refs = [];
     const blockedBy = (el) => {
+        if (!inViewport(el)) return "";
         const rect = el.getBoundingClientRect();
         const x = Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1);
         const y = Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1);
@@ -71,7 +81,12 @@ AGENT_SNAPSHOT_SCRIPT = """
         const topLabel = labelFor(top);
         return `${top.tagName.toLowerCase()} ${topLabel}`.trim();
     };
-    for (const el of Array.from(document.querySelectorAll(selector)).filter(visible)) {
+    const candidates = Array.from(document.querySelectorAll(selector)).filter(visibleOnPage);
+    const ordered = [
+        ...candidates.filter(formRelated),
+        ...candidates.filter((el) => !formRelated(el)),
+    ];
+    for (const el of ordered) {
         if (refs.length >= maxRefs) break;
         const blocker = blockedBy(el);
         if (blocker) continue;
@@ -89,6 +104,12 @@ AGENT_SNAPSHOT_SCRIPT = """
         const submit = form
             ? form.querySelector("[type=submit], button:not([type])")
             : null;
+        const optionsFor = (field) => Array.from(field.options || [])
+            .slice(0, 20)
+            .map((option) => ({
+                value: String(option.value || ""),
+                label: String((option.textContent || "").trim()).slice(0, 80),
+            }));
         refs.push({
             ref,
             tag,
@@ -99,6 +120,7 @@ AGENT_SNAPSHOT_SCRIPT = """
             role: el.getAttribute("role") || "",
             text: labelFor(el),
             actionable: true,
+            in_viewport: inViewport(el),
             blocked_by: "",
             aria_label: el.getAttribute("aria-label") || "",
             name: el.getAttribute("name") || "",
@@ -114,7 +136,11 @@ AGENT_SNAPSHOT_SCRIPT = """
                 id: field.getAttribute("id") || "",
                 placeholder: field.getAttribute("placeholder") || "",
                 aria_label: field.getAttribute("aria-label") || "",
+                options: field.tagName.toLowerCase() === "select"
+                    ? optionsFor(field)
+                    : [],
             })),
+            options: tag === "select" ? optionsFor(el) : [],
             form_method: form ? String(form.method || "GET").toUpperCase() : "",
             form_action: form ? String(form.action || window.location.href) : "",
             submit_text: submit

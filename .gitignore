@@ -15,9 +15,13 @@ wheels/
 # Runtime scan artifacts
 scans/
 captures/
+runs/
+auth-bench/
 *.db
+*.sqlite
 auth.json
 auth*.json
 .research/
+.pytest_cache/
 
 DS_Store

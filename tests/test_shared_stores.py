@@ -86,6 +86,33 @@ def test_registry_facade_summarizes_stores():
     asyncio.run(run())
 
 
+def test_response_store_infers_schema_for_json_samples():
+    async def run():
+        store = ResponseStore()
+        await store.observe(
+            method="GET",
+            url="https://example.com/api/users",
+            status=200,
+            mime="application/json",
+            body='{"id": 1}',
+        )
+        await store.observe(
+            method="GET",
+            url="https://example.com/api/users",
+            status=200,
+            mime="application/json",
+            body='{"id": 2, "name": "alice"}',
+        )
+
+        schema = await store.schema_for("GET", "https://example.com/api/users")
+
+        assert schema["properties"]["id"] == {"type": "integer"}
+        assert schema["properties"]["name"] == {"type": "string"}
+        assert schema["required"] == ["id"]
+
+    asyncio.run(run())
+
+
 def test_decision_trace_writes_jsonl(tmp_path):
     async def run():
         trace_path = tmp_path / "trace.jsonl"

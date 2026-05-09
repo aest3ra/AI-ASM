@@ -1,4 +1,4 @@
-"""Phase-4 browser-agent driver backed by the deterministic mock client."""
+"""Browser-agent driver backed by planner, mock, or LLM tool clients."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from sqlmodel import Session
 
 from ai_asm.agent.budget import BudgetTracker
-from ai_asm.agent.client import HeuristicMockLLMClient, OpenAIClient
+from ai_asm.agent.client import HeuristicMockLLMClient, MockLLMClient, OpenAIClient
 from ai_asm.agent.context import (
     ActionRecord,
     AgentMemory,
@@ -21,7 +21,13 @@ from ai_asm.agent.form_data import FormDataSet
 from ai_asm.agent.loop import AgentLoop
 from ai_asm.agent.network import NetworkEventBuffer
 from ai_asm.agent.planner import plan_local_actions
-from ai_asm.agent.safety import is_click_candidate, label_for_ref, matches_danger
+from ai_asm.agent.safety import (
+    classify_form_text,
+    is_click_candidate,
+    label_for_ref,
+    matches_danger,
+    safe_tool_arguments,
+)
 from ai_asm.agent.snapshot import capture_agent_snapshot, compute_dom_signature
 from ai_asm.agent.tools import ToolCall, ToolExecutor, ToolResult
 from ai_asm.config import DEFAULT_AGENT_MODEL
@@ -67,6 +73,8 @@ async () => {
     window.scrollTo(0, 0);
 }
 """
+
+MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 SUBMIT_FORM_SCRIPT = r"""
 async (payload) => {
@@ -166,7 +174,7 @@ async def run_agent_interactions(
     *,
     scope: Scope,
     clicked_keys: set[str] | None = None,
-    mode: str = "mock",
+    mode: str = "planner",
     model: str | None = None,
     temperature: float = 0.0,
     max_clicks: int = 12,
@@ -198,12 +206,17 @@ async def run_agent_interactions(
             model=model or DEFAULT_AGENT_MODEL,
             temperature=temperature,
         )
-    else:
+        local_planner = plan_local_actions
+    elif mode == "mock":
         client = HeuristicMockLLMClient(
             max_clicks=max_clicks,
             clicked_keys=clicked_keys,
             allow_password_forms=form_data is not None,
         )
+        local_planner = None
+    else:
+        client = MockLLMClient()
+        local_planner = plan_local_actions
     budget = BudgetTracker(max_steps=max_steps or max_clicks + 32)
     executor = ToolExecutor(
         page=adapter,
@@ -233,7 +246,7 @@ async def run_agent_interactions(
             before_observation.url,
             before_observation.dom_signature,
         )
-        visible_forms = _visible_forms_from_snapshot(snapshot, forms)
+        visible_forms = _visible_forms_from_snapshot(filtered_snapshot, forms)
         return {
             "page_url": getattr(page, "url", None),
             "snapshot": filtered_snapshot,
@@ -293,7 +306,7 @@ async def run_agent_interactions(
         )
         memory.remember_requests(after.requests)
         memory.remember_action(record, ref_info)
-        if call.name == "type_ref" and result.ok:
+        if call.name in {"type_ref", "select_ref"} and result.ok:
             memory.remember_typed_form(_form_memory_key(
                 ref_info,
                 page_url=before.url or after.url,
@@ -336,20 +349,13 @@ async def run_agent_interactions(
             trace=trace,
             page_url=getattr(page, "url", None),
         )
-        if mode == "llm":
-            await loop.run_page(
-                context_factory=context_factory,
-                before_action=before_action,
-                after_action=after_action,
-                local_planner=plan_local_actions,
-                max_turns=max_turns,
-            )
-        else:
-            await loop.run_once({
-                "page_url": getattr(page, "url", None),
-                "snapshot": initial_snapshot,
-                "form_test_data": forms.summary(),
-            })
+        await loop.run_page(
+            context_factory=context_factory,
+            before_action=before_action,
+            after_action=after_action,
+            local_planner=local_planner,
+            max_turns=max_turns,
+        )
     except Exception as exc:
         if trace is not None:
             await trace.log_llm_failure(
@@ -387,6 +393,7 @@ class PlaywrightToolPage:
         self.page = page
         self.snapshot = snapshot
         self.form_data = form_data or FormDataSet()
+        self.last_aborted_mutations: list[dict[str, Any]] = []
         self.refs = {
             str(info.get("ref")): info
             for info in snapshot.get("refs", [])
@@ -409,29 +416,54 @@ class PlaywrightToolPage:
         await self.page.goto(url, wait_until="domcontentloaded", timeout=20_000)
 
     async def click_ref(self, ref: str) -> None:
-        before = getattr(self.page, "url", None)
-        await self.page.locator(_ref_selector(ref)).click(
-            timeout=2_000,
-            no_wait_after=True,
-        )
+        async def action() -> None:
+            before = getattr(self.page, "url", None)
+            await self._attach_placeholder_files_for_ref(ref)
+            await self.page.locator(_ref_selector(ref)).click(
+                timeout=2_000,
+                no_wait_after=True,
+            )
+            after = getattr(self.page, "url", None)
+            if after and after != before:
+                _add_discovered_url(self.stats, after)
+
+        await self._capture_and_abort_mutations(action)
         self.stats.buttons_clicked += 1
-        await asyncio.sleep(0.3)
-        after = getattr(self.page, "url", None)
-        if after and after != before:
-            _add_discovered_url(self.stats, after)
 
     async def type_ref(self, ref: str, text: str) -> None:
         await self.page.locator(_ref_selector(ref)).fill(text, timeout=2_000)
 
+    async def select_ref(self, ref: str, value: str) -> None:
+        await self.page.locator(_ref_selector(ref)).select_option(
+            value,
+            timeout=2_000,
+        )
+
     async def submit_form(self, ref: str) -> None:
         info = self.refs.get(ref) or {}
-        result = await self.page.evaluate(
-            SUBMIT_FORM_SCRIPT,
-            {
-                "ref": ref,
-                "values": self.form_data.values_for_form(info),
-            },
-        )
+        result = None
+        error: Exception | None = None
+
+        async def action() -> None:
+            nonlocal result
+            await self._attach_placeholder_files_for_ref(ref)
+            result = await self.page.evaluate(
+                SUBMIT_FORM_SCRIPT,
+                {
+                    "ref": ref,
+                    "values": self.form_data.values_for_form(info),
+                },
+            )
+
+        try:
+            await self._capture_and_abort_mutations(action)
+        except Exception as exc:
+            error = exc
+        if self.last_aborted_mutations:
+            self.stats.forms.submitted += 1
+            return
+        if error is not None:
+            raise error
         if isinstance(result, dict) and result.get("ok"):
             self.stats.forms.submitted += 1
             return
@@ -440,6 +472,75 @@ class PlaywrightToolPage:
         if isinstance(result, dict) and result.get("error"):
             error = str(result.get("error"))
         raise RuntimeError(error)
+
+    async def _capture_and_abort_mutations(self, action) -> list[dict[str, Any]]:
+        captured: list[dict[str, Any]] = []
+
+        if not hasattr(self.page, "route") or not hasattr(self.page, "unroute"):
+            self.last_aborted_mutations = []
+            await action()
+            return captured
+
+        async def handler(route):
+            request = route.request
+            method = request.method.upper()
+            if method in MUTATING_METHODS:
+                captured.append(_mutation_request_summary(request))
+                await route.abort()
+                return
+            # Keep the outer scope route in the chain when Playwright supports it.
+            # Older versions lack fallback(), so continue_() is the best effort path.
+            if hasattr(route, "fallback"):
+                await route.fallback()
+                return
+            await route.continue_()
+
+        self.last_aborted_mutations = []
+        await self.page.route("**/*", handler)
+        try:
+            await action()
+            if hasattr(self.page, "wait_for_timeout"):
+                await self.page.wait_for_timeout(1000)
+        finally:
+            await self.page.unroute("**/*", handler)
+        self.last_aborted_mutations = captured
+        return captured
+
+    async def _attach_placeholder_files_for_ref(self, ref: str) -> None:
+        try:
+            tokens = await self.page.locator(_ref_selector(ref)).evaluate(
+                """
+                (el) => {
+                    const form = el.tagName.toLowerCase() === "form"
+                        ? el
+                        : el.closest("form");
+                    if (!form) return [];
+                    return Array.from(form.querySelectorAll('input[type="file"]'))
+                        .map((input, index) => {
+                            const token = `ai-asm-file-${Date.now()}-${index}`;
+                            input.setAttribute("data-ai-asm-file-input", token);
+                            return token;
+                        });
+                }
+                """
+            )
+        except Exception:
+            return
+        if not isinstance(tokens, list):
+            return
+        for token in tokens:
+            if not isinstance(token, str) or not token:
+                continue
+            try:
+                await self.page.locator(
+                    f'[data-ai-asm-file-input="{token}"]'
+                ).set_input_files([{
+                    "name": "ai-asm-placeholder.txt",
+                    "mimeType": "text/plain",
+                    "buffer": b"ai-asm dry-run placeholder file",
+                }])
+            except Exception:
+                continue
 
     async def scroll(self, direction: str = "down") -> None:
         if direction == "full":
@@ -488,8 +589,6 @@ def _stats_from_snapshot(snapshot: dict[str, Any]) -> InteractionStats:
         input_types = {str(value).lower() for value in item.get("input_types") or []}
         if "password" in input_types:
             form_stats.skipped_password += 1
-        elif "file" in input_types:
-            form_stats.skipped_file += 1
         elif str(item.get("form_method") or "").upper() != "POST":
             form_stats.skipped_get += 1
         elif matches_danger(item):
@@ -625,7 +724,7 @@ def _request_ts(record: dict[str, Any]) -> float | None:
 
 
 API_RESOURCE_TYPES = {"Fetch", "XHR", "WebSocket", "EventSource"}
-API_PATH_MARKERS = ("/api/", "/rest/", "/graphql", "/gql")
+API_PATH_MARKERS = ("/api/", "/api-", "/api_", "/rest/", "/graphql", "/gql")
 STATIC_PATH_EXTENSIONS = {
     ".avif",
     ".bmp",
@@ -675,6 +774,18 @@ def _looks_static_asset_path(path: str) -> bool:
     return any(path.endswith(ext) for ext in STATIC_PATH_EXTENSIONS)
 
 
+def _mutation_request_summary(request) -> dict[str, Any]:
+    post_data = request.post_data or ""
+    return {
+        "method": request.method.upper(),
+        "url": request.url,
+        "resource_type": request.resource_type,
+        "content_type": request.headers.get("content-type"),
+        "post_data_length": len(post_data),
+        "aborted": True,
+    }
+
+
 def _network_wait_timeout_ms(tool_name: str) -> int:
     if tool_name in {"click_ref", "submit_form", "navigate"}:
         return 1200
@@ -684,10 +795,7 @@ def _network_wait_timeout_ms(tool_name: str) -> int:
 
 
 def _safe_action_arguments(call: ToolCall) -> dict[str, Any]:
-    arguments = dict(call.arguments)
-    if call.name == "type_ref" and "text" in arguments:
-        arguments["text"] = f"<redacted len={len(str(arguments['text']))}>"
-    return arguments
+    return safe_tool_arguments(call.name, call.arguments)
 
 
 def _default_goals(*, auth_state_path: str | None) -> list[str]:
@@ -715,7 +823,9 @@ def _made_meaningful_progress(
         return False
     if delta.api_new_requests_count > 0:
         return True
-    if call.name in {"type_ref", "submit_form"}:
+    # Successful field entry is intentionally progress even without network I/O:
+    # the follow-up submit/click is what should produce the request delta.
+    if call.name in {"type_ref", "select_ref", "submit_form"}:
         return True
     return not memory.has_seen_state(after.url, after.dom_signature)
 
@@ -747,7 +857,7 @@ def _form_memory_key(
             "form_action",
         )
     )
-    kind = _classify_form_text(text)
+    kind = classify_form_text(text)
     label = " ".join(label_for_ref(ref_info).lower().split())[:80]
     if not action and not label:
         return ""
@@ -794,14 +904,15 @@ def _visible_forms_from_snapshot(
             "fields": [],
             "submit_candidates": [],
         })
-        if tag in {"input", "textarea", "select"} and _is_typeable_field(item):
+        if tag in {"input", "textarea", "select"} and _is_form_field(item):
             field = {
                 "ref": item.get("ref"),
                 "tag": tag,
                 "type": _field_type(item),
                 "name": item.get("name"),
                 "placeholder": item.get("text") or item.get("aria_label"),
-                "test_value": form_data.value_for_field(item),
+                "test_value": _field_test_value(item, form_data),
+                "options": item.get("options") if tag == "select" else None,
             }
             form["fields"].append({
                 field_key: value
@@ -882,7 +993,7 @@ def _exploration_status(
         if isinstance(item, dict)
     ]
     click_refs = [item for item in refs if is_click_candidate(item)]
-    typeable_refs = [item for item in refs if _is_typeable_field(item)]
+    typeable_refs = [item for item in refs if _is_form_field(item)]
     return {
         "click_ref_count": len(click_refs),
         "type_ref_count": len(typeable_refs),
@@ -910,8 +1021,11 @@ def _field_type(item: dict[str, Any]) -> str:
 
 
 def _is_typeable_field(item: dict[str, Any]) -> bool:
-    if str(item.get("tag") or "").lower() in {"textarea", "select"}:
+    tag = str(item.get("tag") or "").lower()
+    if tag == "textarea":
         return True
+    if tag == "select":
+        return False
     return _field_type(item) not in {
         "checkbox",
         "radio",
@@ -922,6 +1036,32 @@ def _is_typeable_field(item: dict[str, Any]) -> bool:
         "image",
         "file",
     }
+
+
+def _is_form_field(item: dict[str, Any]) -> bool:
+    return str(item.get("tag") or "").lower() == "select" or _is_typeable_field(item)
+
+
+def _field_test_value(item: dict[str, Any], form_data: FormDataSet) -> str:
+    if str(item.get("tag") or "").lower() != "select":
+        return form_data.value_for_field(item)
+    configured = form_data.configured_value_for_field(item)
+    if configured is not None:
+        return configured
+    return _first_select_option_value(item)
+
+
+def _first_select_option_value(item: dict[str, Any]) -> str:
+    options = item.get("options")
+    if not isinstance(options, list):
+        return ""
+    for option in options:
+        if not isinstance(option, dict):
+            continue
+        value = str(option.get("value") or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _looks_like_submit_control(item: dict[str, Any]) -> bool:
@@ -964,20 +1104,7 @@ def _classify_form(form: dict[str, Any]) -> str:
             " ".join(str(field.get("placeholder") or "") for field in form.get("fields") or []),
         )
     )
-    return _classify_form_text(text)
-
-
-def _classify_form_text(text: str) -> str:
-    text = text.lower()
-    if "register" in text or "sign up" in text or "가입" in text:
-        return "register"
-    if "signup" in text or "sign-up" in text:
-        return "register"
-    if "password" in text or "login" in text or "sign in" in text or "로그인" in text:
-        return "login"
-    if "search" in text or "query" in text or "검색" in text:
-        return "search"
-    return "form"
+    return classify_form_text(text)
 
 
 def _form_memory_key_from_form(form: dict[str, Any]) -> str:
@@ -987,7 +1114,7 @@ def _form_memory_key_from_form(form: dict[str, Any]) -> str:
         str(form.get(key) or "")
         for key in ("label", "submit_text", "action")
     )
-    kind = _classify_form_text(text)
+    kind = classify_form_text(text)
     label = " ".join(str(form.get("label") or "").lower().split())[:80]
     if not action and not label:
         return ""

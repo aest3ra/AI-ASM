@@ -128,7 +128,12 @@ def _plan_visible_form(context: dict[str, Any]) -> list[ToolCall]:
         if key and key in attempted:
             continue
         if key and key in typed:
+            fields = _field_actions(form)
             submit = _submit_action_for_form(form)
+            if fields:
+                if submit is not None:
+                    return [*fields, submit]
+                return fields
             if submit is not None:
                 return [submit]
             return [_scroll_action()]
@@ -187,6 +192,17 @@ def _field_actions(form: dict[str, Any]) -> list[ToolCall]:
         ref = str(field.get("ref") or "")
         value = field.get("test_value")
         if not ref or value is None:
+            continue
+        if str(field.get("tag") or "").lower() == "select":
+            actions.append(ToolCall(
+                id=f"local-select-{ref}",
+                name="select_ref",
+                arguments={
+                    "ref": ref,
+                    "value": str(value),
+                    "reason": "select visible form option with configured test data",
+                },
+            ))
             continue
         actions.append(ToolCall(
             id=f"local-type-{ref}",

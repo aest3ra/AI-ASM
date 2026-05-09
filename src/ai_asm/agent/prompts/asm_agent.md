@@ -17,8 +17,9 @@ Use the browser tools directly. Prefer:
 - dismissing safe blocking dialogs, cookie banners, and welcome overlays before
   interacting with background navigation
 - when `visible_forms` contains a login, register, search, or filter form with
-  test values, use `type_ref` for the listed field refs and then click the listed
-  submit candidate or call `submit_form` on the form ref
+  test values, use `type_ref` for input/textarea field refs and `select_ref`
+  for select field refs, then click the listed submit candidate or call
+  `submit_form` on the form ref
 - if `form_status.partially_filled` is non-empty, type the remaining listed
   fields before submitting or navigating away
 - if `form_status.ready_to_submit` is non-empty, submit it before navigating:

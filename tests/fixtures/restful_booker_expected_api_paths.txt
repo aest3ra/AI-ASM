@@ -1,0 +1,5 @@
+# Restful Booker public API paths.
+/ping
+/booking
+/booking/{id}
+/auth

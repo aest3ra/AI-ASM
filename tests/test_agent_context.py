@@ -129,6 +129,46 @@ def test_agent_memory_filters_typed_fields_but_keeps_buttons():
     assert memory.summary()["typed_ref_count"] == 1
 
 
+def test_agent_memory_filters_selected_fields():
+    memory = AgentMemory()
+    selected_ref = {
+        "ref": "r1",
+        "tag": "select",
+        "name": "category",
+        "text": "Category",
+    }
+    memory.remember_action(
+        ActionRecord(
+            turn=0,
+            tool="select_ref",
+            arguments={"ref": "r1", "value": "title"},
+            ok=True,
+        ),
+        selected_ref,
+    )
+
+    snapshot = {
+        "refs": [
+            {
+                "ref": "r9",
+                "tag": "select",
+                "name": "category",
+                "text": "Category",
+            },
+            {
+                "ref": "r10",
+                "tag": "button",
+                "text": "Search",
+            },
+        ],
+    }
+
+    filtered = memory.filter_snapshot(snapshot)
+
+    assert [ref["ref"] for ref in filtered["refs"]] == ["r10"]
+    assert memory.summary()["typed_ref_count"] == 1
+
+
 def test_agent_memory_tracks_visited_state_summary():
     memory = AgentMemory()
 

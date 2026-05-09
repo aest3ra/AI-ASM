@@ -33,6 +33,7 @@ def test_orchestrator_saves_page_captures_by_provenance(tmp_path):
             source="cdp",
             response_status=200,
             response_mime="application/json",
+            response_body='{"users": [{"id": 1}]}',
         ),
         CapturedRequest(
             request_id="probe",
@@ -59,3 +60,6 @@ def test_orchestrator_saves_page_captures_by_provenance(tmp_path):
         ("/api/users", "cdp_capture"),
         ("/api/admin", "static_probe"),
     }
+    users = next(row for row in rows if row.path_template == "/api/users")
+    assert users.response_schema_json is not None
+    assert '"users"' in users.response_schema_json

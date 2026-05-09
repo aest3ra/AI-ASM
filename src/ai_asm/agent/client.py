@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 from ai_asm.config import DEFAULT_AGENT_MODEL, DEFAULT_AGENT_TEMPERATURE
 from ai_asm.agent.safety import (
+    classify_form_text,
     interaction_key,
     is_click_candidate,
     label_for_ref,
@@ -57,10 +58,12 @@ class MockLLMClient:
 
 
 class HeuristicMockLLMClient:
-    """Deterministic Phase-4 client that emits tool calls from a snapshot.
+    """Legacy deterministic Phase-4 client that emits tool calls from a snapshot.
 
     It keeps the production contract shaped like LLM tool-use while preserving
     the old safe-scroll/click/form behavior until a real LLM client is enabled.
+    Planner mode is the default path; keep this client for compatibility and
+    contract tests only.
     """
 
     def __init__(
@@ -80,6 +83,8 @@ class HeuristicMockLLMClient:
     async def complete(self, context: dict[str, Any]) -> AgentResponse:
         self.calls.append(context)
         refs = _snapshot_refs(context)
+        attempted_forms = _attempted_forms(context)
+        page_url = str(context.get("page_url") or "")
         tool_calls = [
             ToolCall(
                 id="mock-scroll",
@@ -117,6 +122,8 @@ class HeuristicMockLLMClient:
                     info,
                     allow_password=self.allow_password_forms,
                 ):
+                    continue
+                if _mock_form_memory_key(info, page_url) in attempted_forms:
                     continue
                 ref = str(info.get("ref") or "")
                 if not ref:
@@ -196,6 +203,30 @@ def _snapshot_refs(context: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in refs if isinstance(item, dict)]
 
 
+def _attempted_forms(context: dict[str, Any]) -> set[str]:
+    memory = context.get("memory")
+    if not isinstance(memory, dict):
+        return set()
+    attempted = memory.get("attempted_forms")
+    if not isinstance(attempted, list):
+        return set()
+    return {str(item) for item in attempted}
+
+
+def _mock_form_memory_key(info: dict[str, Any], page_url: str) -> str:
+    action = str(info.get("form_action") or page_url or "").strip().lower()
+    method = str(info.get("form_method") or "").strip().upper()
+    text = " ".join(
+        str(info.get(key) or "")
+        for key in ("text", "aria_label", "name", "submit_text", "form_action")
+    )
+    kind = classify_form_text(text)
+    label = " ".join(label_for_ref(info).lower().split())[:80]
+    if not action and not label:
+        return ""
+    return f"{kind}:{method}:{action or label}"
+
+
 def _is_safe_post_form(
     info: dict[str, Any],
     *,
@@ -266,6 +297,9 @@ def _schema_for_tool(name: str, required: tuple[str, ...]) -> dict[str, Any]:
     elif name == "type_ref":
         properties["ref"] = {"type": "string"}
         properties["text"] = {"type": "string"}
+    elif name == "select_ref":
+        properties["ref"] = {"type": "string"}
+        properties["value"] = {"type": "string"}
     elif name == "navigate":
         properties["url"] = {"type": "string"}
     elif name == "scroll":

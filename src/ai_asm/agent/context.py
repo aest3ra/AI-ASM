@@ -130,7 +130,7 @@ class AgentMemory:
         key = interaction_key(ref_info, label)
         if record.ok:
             if key:
-                if record.tool == "type_ref":
+                if record.tool in {"type_ref", "select_ref"}:
                     self.typed_ref_keys.add(key)
                 elif is_click_candidate(ref_info):
                     self.clicked_ref_keys.add(key)

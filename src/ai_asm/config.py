@@ -10,7 +10,7 @@ import yaml
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 StaticProbeAuthMode = Literal["none", "cookie-only", "learned"]
-AgentMode = Literal["mock", "llm"]
+AgentMode = Literal["planner", "mock", "llm"]
 DEFAULT_AGENT_MODEL = "gpt-5-mini"
 DEFAULT_AGENT_TEMPERATURE = 0.0
 
@@ -45,7 +45,7 @@ class AuthConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    mode: AgentMode = "mock"
+    mode: AgentMode = "planner"
     model: str = DEFAULT_AGENT_MODEL
     temperature: float = Field(default=DEFAULT_AGENT_TEMPERATURE, ge=0.0, le=2.0)
     max_steps_per_page: int = Field(default=24, gt=0)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 
 from sqlmodel import Session, select
 
+from ai_asm.schema.inferrer import merge_json_schemas
 from ai_asm.normalizer.static import ApiCandidate
 from ai_asm.normalizer.types import NormalizedEndpoint
 from ai_asm.storage.db import (
@@ -21,7 +23,9 @@ from ai_asm.storage.db import (
     Parameter,
     ScanSummary,
     StaticCandidate,
+    UrlSurface,
 )
+from ai_asm.surface.classifier import UrlSurfaceRecord, evidence_json
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,7 @@ def save_endpoints(
     auth_state_path: str | Path | None = None,
     auth_label: str | None = None,
     provenance: str | None = None,
+    response_schemas: Mapping[tuple[str, str, str], dict[str, Any]] | None = None,
 ) -> EndpointSaveStats:
     """Persist normalized endpoints using the phase-0 accumulated model.
 
@@ -51,6 +56,11 @@ def save_endpoints(
     updated = 0
 
     for ne in endpoints:
+        schema = (
+            response_schemas.get((ne.method, ne.host, ne.path_template))
+            if response_schemas
+            else None
+        )
         ep = session.exec(
             select(Endpoint).where(
                 Endpoint.auth_context_id == auth_context.id,
@@ -70,6 +80,7 @@ def save_endpoints(
                 sample_url=ne.sample_url,
                 seen_count=ne.seen_count,
                 provenance=provenance,
+                response_schema_json=_merge_response_schema(None, schema),
                 auth_state_path=(
                     str(auth_state_path) if auth_state_path is not None else None
                 ),
@@ -83,6 +94,10 @@ def save_endpoints(
             ep.seen_count += ne.seen_count
             ep.last_seen_scan_id = scan_id
             ep.provenance = _merge_csv(ep.provenance, provenance)
+            ep.response_schema_json = _merge_response_schema(
+                ep.response_schema_json,
+                schema,
+            )
             if auth_state_path is not None:
                 ep.auth_state_path = str(auth_state_path)
             if ep.first_seen_scan_id is None:
@@ -196,6 +211,59 @@ def save_static_candidates(
         )
         if candidate.sample_url in probe_errors:
             existing.probe_error = probe_errors[candidate.sample_url]
+    session.commit()
+
+
+def save_url_surfaces(
+    session: Session,
+    scan_id: int,
+    surfaces: list[UrlSurfaceRecord],
+) -> None:
+    """Persist discovered URL surface separately from confirmed endpoints."""
+    for surface in surfaces:
+        existing = session.exec(
+            select(UrlSurface).where(
+                UrlSurface.scan_id == scan_id,
+                UrlSurface.method == surface.method,
+                UrlSurface.host == surface.host,
+                UrlSurface.path_template == surface.path_template,
+                UrlSurface.route_kind == surface.route_kind,
+            )
+        ).first()
+        if existing is None:
+            session.add(UrlSurface(
+                scan_id=scan_id,
+                method=surface.method,
+                host=surface.host,
+                path_template=surface.path_template,
+                sample_url=surface.sample_url,
+                source_kind=surface.source_kind,
+                observed=surface.observed,
+                status_code=surface.status_code,
+                mime=surface.mime,
+                resource_type=surface.resource_type,
+                route_kind=surface.route_kind,
+                api_score=surface.api_score,
+                evidence_json=evidence_json(surface),
+                source_url=surface.source_url,
+                seen_count=surface.seen_count,
+            ))
+            continue
+
+        existing.seen_count += surface.seen_count
+        existing.observed = existing.observed or surface.observed
+        existing.api_score = max(existing.api_score, surface.api_score)
+        existing.source_kind = (
+            _merge_csv(existing.source_kind, surface.source_kind)
+            or surface.source_kind
+        )
+        existing.status_code = existing.status_code or surface.status_code
+        existing.mime = existing.mime or surface.mime
+        existing.resource_type = existing.resource_type or surface.resource_type
+        existing.evidence_json = _merge_json_objects(
+            existing.evidence_json,
+            evidence_json(surface),
+        )
     session.commit()
 
 
@@ -375,6 +443,37 @@ def _merge_samples(existing_json: str, new_samples: list[str]) -> list[str]:
         if sample not in samples and len(samples) < 5:
             samples.append(sample)
     return samples
+
+
+def _merge_json_objects(existing_json: str | None, new_json: str | None) -> str:
+    try:
+        existing = dict(json.loads(existing_json or "{}"))
+    except Exception:
+        existing = {}
+    try:
+        new = dict(json.loads(new_json or "{}"))
+    except Exception:
+        new = {}
+    existing.update(new)
+    return json.dumps(existing, ensure_ascii=False, sort_keys=True)
+
+
+def _merge_response_schema(
+    existing_json: str | None,
+    new_schema: dict[str, Any] | None,
+) -> str | None:
+    if not new_schema:
+        return existing_json
+    try:
+        existing = json.loads(existing_json) if existing_json else None
+    except Exception:
+        existing = None
+    merged = (
+        merge_json_schemas(existing, new_schema)
+        if isinstance(existing, dict)
+        else new_schema
+    )
+    return json.dumps(merged, ensure_ascii=False, sort_keys=True)
 
 
 def _json_or_none(value: str | dict[str, Any] | None) -> str | None:

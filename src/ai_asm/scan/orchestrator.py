@@ -8,6 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlmodel import Session, select
 
@@ -27,8 +28,11 @@ from ai_asm.normalizer import (
     discover_api_candidates,
     normalize,
 )
+from ai_asm.normalizer.pipeline import canonical_api_path, is_api_capture
+from ai_asm.normalizer.url import templatize_path
 from ai_asm.output.artifacts import write_capture_artifact
 from ai_asm.output.request_log import write_request_log
+from ai_asm.schema.inferrer import infer_schema_from_json_bodies
 from ai_asm.shared.candidate_store import CandidateStore
 from ai_asm.shared.decision_trace import DecisionTrace
 from ai_asm.shared.response_store import ResponseStore
@@ -39,6 +43,12 @@ from ai_asm.storage.repo import (
     save_endpoints,
     save_scan_summary,
     save_static_candidates,
+    save_url_surfaces,
+)
+from ai_asm.surface import (
+    UrlSurfaceRecord,
+    discover_url_surfaces,
+    surfaces_from_static_candidates,
 )
 
 
@@ -54,6 +64,7 @@ class ScanRunResult:
     scoped_captured: list[CapturedRequest]
     endpoints: list[NormalizedEndpoint]
     static_candidates: list[ApiCandidate]
+    url_surfaces: list[UrlSurfaceRecord]
     diagnostics: ScanDiagnostics
     dispatcher: AnalyzerDispatcher
     pending_candidates: int
@@ -177,6 +188,8 @@ class ScanOrchestrator:
 
         elapsed = time.monotonic() - started
         endpoints = normalize(scoped_captured, api_only=True)
+        url_surfaces = discover_url_surfaces(scoped_captured, self.scope)
+        url_surfaces.extend(surfaces_from_static_candidates(static_candidates))
         asyncio.run(_reconcile_candidates(candidate_store, endpoints))
         pending_candidates = asyncio.run(candidate_store.pending_count())
 
@@ -186,6 +199,7 @@ class ScanOrchestrator:
             scan_diag,
             endpoints,
             static_candidates,
+            url_surfaces,
             probed_urls,
             probe_errors,
             elapsed,
@@ -207,6 +221,7 @@ class ScanOrchestrator:
             scoped_captured=scoped_captured,
             endpoints=endpoints,
             static_candidates=static_candidates,
+            url_surfaces=url_surfaces,
             diagnostics=scan_diag,
             dispatcher=dispatcher,
             pending_candidates=pending_candidates,
@@ -288,6 +303,7 @@ class ScanOrchestrator:
             endpoints = normalize(group, api_only=True)
             if not endpoints:
                 continue
+            response_schemas = _response_schemas_for_captures(group)
             await _reconcile_candidates(candidate_store, endpoints)
             with Session(engine) as session:
                 stats = save_endpoints(
@@ -297,6 +313,7 @@ class ScanOrchestrator:
                     auth_state_path=self.auth_state_path,
                     auth_label=self.auth_label,
                     provenance=provenance,
+                    response_schemas=response_schemas,
                 )
             self.endpoint_stats = EndpointSaveStats(
                 endpoints_added=self.endpoint_stats.endpoints_added + stats.endpoints_added,
@@ -312,6 +329,7 @@ class ScanOrchestrator:
         diag: ScanDiagnostics,
         endpoints: list[NormalizedEndpoint],
         static_candidates: list[ApiCandidate],
+        url_surfaces: list[UrlSurfaceRecord],
         probed_urls: set[str],
         probe_errors: dict[str, str],
         elapsed: float,
@@ -333,6 +351,7 @@ class ScanOrchestrator:
                 probed_urls=probed_urls,
                 probe_errors=probe_errors,
             )
+            save_url_surfaces(session, scan_id, url_surfaces)
             flagged_count = len(session.exec(
                 select(FlaggedItem).where(FlaggedItem.scan_id == scan_id)
             ).all())
@@ -403,3 +422,36 @@ def _provenance_for_source(source: str) -> str:
 def _has_header(headers: dict[str, str], name: str) -> bool:
     wanted = name.lower()
     return any(key.lower() == wanted for key in headers)
+
+
+def _response_schemas_for_captures(
+    captures: list[CapturedRequest],
+) -> dict[tuple[str, str, str], dict]:
+    bodies_by_endpoint: dict[tuple[str, str, str], list[str]] = defaultdict(list)
+    for cap in captures:
+        if not is_api_capture(cap):
+            continue
+        if not cap.response_body or cap.response_body_truncated or cap.body_fetch_error:
+            continue
+        if not _looks_like_json_body(cap):
+            continue
+        parsed = urlparse(cap.url)
+        host = parsed.hostname or ""
+        path = canonical_api_path(parsed.path or "/")
+        key = (cap.method, host, templatize_path(path))
+        bodies_by_endpoint[key].append(cap.response_body)
+
+    schemas: dict[tuple[str, str, str], dict] = {}
+    for key, bodies in bodies_by_endpoint.items():
+        schema = infer_schema_from_json_bodies(bodies)
+        if schema:
+            schemas[key] = schema
+    return schemas
+
+
+def _looks_like_json_body(cap: CapturedRequest) -> bool:
+    mime = (cap.response_mime or "").lower()
+    if "json" in mime:
+        return True
+    body = cap.response_body or ""
+    return body.lstrip().startswith(("{", "["))

@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 
 from ai_asm.agent.budget import BudgetExceeded
 from ai_asm.agent.client import LLMClient
+from ai_asm.agent.safety import safe_tool_arguments
 from ai_asm.agent.tools import ToolCall, ToolResult
 from ai_asm.shared.decision_trace import DecisionTrace
 
@@ -194,11 +195,8 @@ def _summarize_tool_call(call) -> dict[str, Any]:
 def _can_continue_batch(call: ToolCall, result: ToolResult) -> bool:
     if not result.ok:
         return False
-    return call.name in {"type_ref", "get_text"}
+    return call.name in {"type_ref", "select_ref", "get_text", "scroll"}
 
 
 def _safe_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    safe = dict(arguments)
-    if tool_name == "type_ref" and "text" in safe:
-        safe["text"] = f"<redacted len={len(str(safe['text']))}>"
-    return safe
+    return safe_tool_arguments(tool_name, arguments)

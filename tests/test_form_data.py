@@ -38,3 +38,11 @@ def test_form_data_uses_visible_text_as_lookup_key():
     data = FormDataSet(fields={"email": "user@example.com"})
 
     assert data.value_for_field({"type": "text", "text": "Email"}) == "user@example.com"
+
+
+def test_form_data_infers_semantic_defaults_from_text_inputs():
+    data = FormDataSet()
+
+    assert data.value_for_field({"type": "text", "name": "email"}) == "ai-asm@example.com"
+    assert data.value_for_field({"type": "text", "name": "phone"}) == "5551234567"
+    assert data.value_for_field({"type": "text", "name": "linkedin"}) == "https://example.com"

@@ -33,6 +33,168 @@ def test_discovers_scoped_api_paths_from_text_assets():
     ]
 
 
+def test_does_not_import_openapi_documents_as_static_candidates():
+    candidates = discover_api_candidates(
+        [
+            cap(
+                "https://x.test/openapi.json",
+                """
+                {
+                  "openapi": "3.0.0",
+                  "paths": {
+                    "/users/v1": {"get": {}},
+                    "/books/v1/{book}": {"get": {}}
+                  }
+                }
+                """,
+                mime="application/json",
+            )
+        ],
+        Scope(ScopeConfig(include_domains=["x.test"])),
+    )
+
+    assert candidates == []
+
+
+def test_discovers_prefixless_paths_from_api_docs_html():
+    candidates = discover_api_candidates(
+        [
+            cap(
+                "https://x.test/apidoc/index.html",
+                """
+                <h1>API Documentation</h1>
+                <p>GET /booking</p>
+                <p>GET /booking/1</p>
+                <p>POST /auth</p>
+                <a href="/apidoc/assets/app.js">asset</a>
+                """,
+                mime="text/html",
+            )
+        ],
+        Scope(ScopeConfig(include_domains=["x.test"])),
+    )
+
+    assert [(c.host, c.path_template) for c in candidates] == [
+        ("x.test", "/auth"),
+        ("x.test", "/booking"),
+        ("x.test", "/booking/{id}"),
+    ]
+
+
+def test_discovers_prefixless_httpbin_doc_links():
+    candidates = discover_api_candidates(
+        [
+            cap(
+                "https://x.test/",
+                """
+                <title>HTTP Client Testing Service</title>
+                <h2>Endpoints</h2>
+                <a href="/get">GET</a>
+                <a href="/post">POST</a>
+                <a href="/forms/post">Form POST</a>
+                <a href="/anything"><code>/anything/:anything</code></a>
+                <a href="/style.css">style</a>
+                """,
+                mime="text/html",
+            )
+        ],
+        Scope(ScopeConfig(include_domains=["x.test"])),
+    )
+
+    assert [(c.host, c.path_template) for c in candidates] == [
+        ("x.test", "/anything"),
+        ("x.test", "/anything/{id}"),
+        ("x.test", "/forms/post"),
+        ("x.test", "/get"),
+        ("x.test", "/post"),
+    ]
+
+
+def test_discovers_html_form_actions_and_action_links_without_page_link_noise():
+    candidates = discover_api_candidates(
+        [
+            cap(
+                "https://x.test/ko/index.do",
+                """
+                <html>
+                  <title>University website</title>
+                  <nav>
+                    <a href="/ko/about/history.do">History</a>
+                    <a href="/ko/research/result.do">Research</a>
+                    <a href="/cms/etcResourceOpen.do?site=ko">Resource</a>
+                    <a href="/cms/print/print.do">Print</a>
+                  </nav>
+                  <form method="GET" action="/ko/search/result.do">
+                    <input name="q">
+                  </form>
+                  <p>Request information from the office.</p>
+                  <p>Response times may vary.</p>
+                </html>
+                """,
+                mime="text/html",
+            )
+        ],
+        Scope(ScopeConfig(include_domains=["x.test"])),
+    )
+
+    assert [(c.host, c.path_template) for c in candidates] == [
+        ("x.test", "/cms/etcResourceOpen.do"),
+        ("x.test", "/cms/print/print.do"),
+        ("x.test", "/ko/search/result.do"),
+    ]
+
+
+def test_does_not_treat_regular_cms_page_links_as_static_endpoints():
+    candidates = discover_api_candidates(
+        [
+            cap(
+                "https://x.test/ko/index.do",
+                """
+                <html>
+                  <a href="/ko/about/history.do">History</a>
+                  <a href="/ko/research/result.do">Research</a>
+                  <a href="/ko/campuslife/notice.do">Notice</a>
+                </html>
+                """,
+                mime="text/html",
+            )
+        ],
+        Scope(ScopeConfig(include_domains=["x.test"])),
+    )
+
+    assert candidates == []
+
+
+def test_discovers_apidoc_data_js_paths_without_vendor_noise():
+    candidates = discover_api_candidates(
+        [
+            cap(
+                "https://x.test/apidoc/api_data.js",
+                """
+                define({ "api": [
+                  {"type": "post", "url": "auth"},
+                  {"type": "get", "url": "booking/:id"},
+                  {"type": "get", "url": "ping"}
+                ]});
+                """,
+                mime="application/javascript",
+            ),
+            cap(
+                "https://x.test/apidoc/vendor/jquery.min.js",
+                "define({}); var url = '/not-an-endpoint';",
+                mime="application/javascript",
+            ),
+        ],
+        Scope(ScopeConfig(include_domains=["x.test"])),
+    )
+
+    assert [(c.host, c.path_template) for c in candidates] == [
+        ("x.test", "/auth"),
+        ("x.test", "/booking/{id}"),
+        ("x.test", "/ping"),
+    ]
+
+
 def test_skips_out_of_scope_absolute_candidates():
     candidates = discover_api_candidates(
         [cap("https://x.test/app.js", "'https://evil.test/api/users'")],

@@ -25,6 +25,10 @@ class FakeToolPage:
                 "text": "Send feedback",
                 "form_action": "https://evil.example.net/submit",
             },
+            "href-fallback": {
+                "text": "Docs",
+                "href": "/docs",
+            },
         }
 
     async def describe_ref(self, ref):
@@ -38,6 +42,9 @@ class FakeToolPage:
 
     async def type_ref(self, ref, text):
         self.actions.append(("type_ref", ref, text))
+
+    async def select_ref(self, ref, value):
+        self.actions.append(("select_ref", ref, value))
 
     async def submit_form(self, ref):
         self.actions.append(("submit_form", ref))
@@ -53,6 +60,20 @@ class FakeToolPage:
 class FailingToolPage(FakeToolPage):
     async def click_ref(self, ref):
         raise TimeoutError("blocked")
+
+
+class DryRunToolPage(FakeToolPage):
+    async def click_ref(self, ref):
+        self.actions.append(("click_ref", ref))
+        self.last_aborted_mutations = [
+            {
+                "method": "POST",
+                "url": "https://example.com/api-internal/apply-job?jobid=1",
+                "resource_type": "fetch",
+                "post_data_length": 32,
+                "aborted": True,
+            }
+        ]
 
 
 def _executor(tmp_path):
@@ -117,6 +138,25 @@ def test_tool_executor_converts_runtime_failures_to_tool_results(tmp_path):
     asyncio.run(run())
 
 
+def test_tool_executor_falls_back_to_in_scope_href_when_click_times_out(tmp_path):
+    async def run():
+        executor, _, _ = _executor(tmp_path)
+        executor.page = FailingToolPage()
+
+        result = await executor.execute(ToolCall(
+            id="t-fallback",
+            name="click_ref",
+            arguments={"ref": "href-fallback"},
+        ))
+
+        assert result.ok is True
+        assert result.data["fallback"] == "navigate"
+        assert result.data["url"] == "https://example.com/docs"
+        assert executor.page.actions == [("navigate", "https://example.com/docs")]
+
+    asyncio.run(run())
+
+
 def test_tool_executor_rejects_missing_required_args_without_page_action(tmp_path):
     async def run():
         executor, engine, trace = _executor(tmp_path)
@@ -137,6 +177,47 @@ def test_tool_executor_rejects_missing_required_args_without_page_action(tmp_pat
             rows = session.exec(select(FlaggedItem)).all()
         assert rows[0].flag_kind == "agent_invalid_args"
         assert rows[0].item_kind == "type_ref"
+
+    asyncio.run(run())
+
+
+def test_tool_executor_runs_select_ref(tmp_path):
+    async def run():
+        executor, _, _ = _executor(tmp_path)
+
+        result = await executor.execute(ToolCall(
+            id="t-select",
+            name="select_ref",
+            arguments={"ref": "safe", "value": "title"},
+        ))
+
+        assert result.ok is True
+        assert executor.page.actions == [("select_ref", "safe", "title")]
+
+    asyncio.run(run())
+
+
+def test_tool_executor_reports_aborted_mutations_from_dry_run_click(tmp_path):
+    async def run():
+        executor, _, _ = _executor(tmp_path)
+        executor.page = DryRunToolPage()
+
+        result = await executor.execute(ToolCall(
+            id="t-dry-run",
+            name="click_ref",
+            arguments={"ref": "safe"},
+        ))
+
+        assert result.ok is True
+        assert result.data["aborted_mutations"] == [
+            {
+                "method": "POST",
+                "url": "https://example.com/api-internal/apply-job?jobid=1",
+                "resource_type": "fetch",
+                "post_data_length": 32,
+                "aborted": True,
+            }
+        ]
 
     asyncio.run(run())
 
