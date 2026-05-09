@@ -114,8 +114,6 @@ def is_api_capture(req: CapturedRequest) -> bool:
         and not _looks_static_mime(mime)
     ):
         return True
-    if req.resource_type in {"XHR", "Fetch"} and "json" in mime:
-        return True
     return (
         req.resource_type == "Document"
         and mime.startswith("text/plain")

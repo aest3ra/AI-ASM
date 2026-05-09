@@ -25,6 +25,10 @@ class FakeToolPage:
                 "text": "Send feedback",
                 "form_action": "https://evil.example.net/submit",
             },
+            "delete-form": {
+                "text": "Delete account",
+                "form_action": "https://example.com/account/delete",
+            },
             "href-fallback": {
                 "text": "Docs",
                 "href": "/docs",
@@ -302,6 +306,27 @@ def test_tool_executor_allows_upload_labeled_forms(tmp_path):
         with Session(engine) as session:
             rows = session.exec(select(FlaggedItem)).all()
         assert rows == []
+
+    asyncio.run(run())
+
+
+def test_tool_executor_rejects_blacklisted_submit_form(tmp_path):
+    async def run():
+        executor, engine, _ = _executor(tmp_path)
+
+        result = await executor.execute(ToolCall(
+            id="t4b",
+            name="submit_form",
+            arguments={"ref": "delete-form"},
+        ))
+
+        assert result.ok is False
+        assert "blacklist" in result.error
+        assert executor.page.actions == []
+        with Session(engine) as session:
+            rows = session.exec(select(FlaggedItem)).all()
+        assert rows[0].flag_kind == "agent_blacklist"
+        assert rows[0].item_kind == "form_submit"
 
     asyncio.run(run())
 

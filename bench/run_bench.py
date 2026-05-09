@@ -245,7 +245,13 @@ def write_bench_scan_config(
         raw["static_probe_auth"] = str(target["static_probe_auth"])
 
     agent_config = dict(raw.get("agent") or {})
-    agent_config["mode"] = agent or str(target.get("agent") or agent_config.get("mode") or "planner")
+    selected_agent = (
+        agent
+        or target.get("agent")
+        or agent_config.get("mode")
+        or "planner"
+    )
+    agent_config["mode"] = str(selected_agent)
     if target.get("agent_budget"):
         agent_config["max_steps_per_page"] = int(target["agent_budget"])
     if target.get("form_data"):
