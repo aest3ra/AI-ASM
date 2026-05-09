@@ -16,7 +16,7 @@ from rich import print
 from rich.table import Table
 from sqlmodel import Session, select
 
-from ai_asm.config import AgentMode, AuthConfig, StaticProbeAuthMode, load_config
+from ai_asm.config import AuthConfig, load_config
 from ai_asm.crawler.scope import Scope
 from ai_asm.output.console import print_scan_result
 from ai_asm.output.flagged import (
@@ -73,48 +73,6 @@ def scan(
         readable=True,
         help="Resume pending frontier from an existing ai-asm DB.",
     ),
-    static_probe_auth: str | None = typer.Option(
-        None,
-        "--static-probe-auth",
-        help=(
-            "Auth mode for static GET probes: none, cookie-only, or learned. "
-            "Defaults to config/static_probe_auth."
-        ),
-    ),
-    agent: str | None = typer.Option(
-        None,
-        "--agent",
-        help=(
-            "Browser agent mode: planner, mock, or llm. "
-            "planner is the default; mock is legacy/debug only. "
-            "Defaults to config.agent.mode."
-        ),
-    ),
-    model: str | None = typer.Option(
-        None,
-        "--model",
-        help="LLM model for --agent llm. Defaults to config.agent.model.",
-    ),
-    temperature: float | None = typer.Option(
-        None,
-        "--temperature",
-        min=0.0,
-        max=2.0,
-        help="LLM temperature for --agent llm. Defaults to config.agent.temperature.",
-    ),
-    agent_budget: int | None = typer.Option(
-        None,
-        "--agent-budget",
-        min=1,
-        help="Max tool steps per page.",
-    ),
-    form_data: Path | None = typer.Option(
-        None,
-        "--form-data",
-        exists=True,
-        readable=True,
-        help="YAML file with test values for form submission.",
-    ),
 ) -> None:
     """Crawl the target and persist normalized endpoints."""
     try:
@@ -125,18 +83,6 @@ def scan(
 
     if auth is not None:
         config.auth = AuthConfig(type="storage_state", storage_state_path=auth)
-    if static_probe_auth is not None:
-        config.static_probe_auth = _parse_static_probe_auth(static_probe_auth)
-    if agent is not None:
-        config.agent.mode = _parse_agent_mode(agent)
-    if model is not None:
-        config.agent.model = model
-    if temperature is not None:
-        config.agent.temperature = temperature
-    if agent_budget is not None:
-        config.agent.max_steps_per_page = agent_budget
-    if form_data is not None:
-        config.agent.form_data_path = form_data
 
     target = str(config.target)
     db_path, out_dir = _resolve_scan_paths(
@@ -155,12 +101,7 @@ def scan(
         f"rate={config.limits.rate_limit_rps}rps "
         f"per_template={config.limits.max_visits_per_template} "
         f"auth={auth_state_path or 'none'} "
-        f"static_probe_auth={config.static_probe_auth} "
         f"agent={config.agent.mode} "
-        f"model={config.agent.model if config.agent.mode == 'llm' else '-'} "
-        f"temperature={config.agent.temperature if config.agent.mode == 'llm' else '-'} "
-        f"agent_budget={config.agent.max_steps_per_page} "
-        f"form_data={config.agent.form_data_path or 'builtin'} "
         f"db={db_path} "
         f"out={out_dir} "
         f"({'headless' if headless else 'headed'})"
@@ -294,34 +235,6 @@ def _print_default_scan_outputs(outputs: dict[str, Path]) -> None:
     table.add_row("flagged yaml", str(outputs["flagged_yaml"]))
     table.add_row("flagged curl", str(outputs["flagged_curl"]))
     print(table)
-
-
-def _parse_static_probe_auth(value: str) -> StaticProbeAuthMode:
-    allowed = {"none", "cookie-only", "learned"}
-    normalized = value.strip().lower()
-    if normalized not in allowed:
-        typer.secho(
-            f"invalid --static-probe-auth {value!r}; expected one of: "
-            f"{', '.join(sorted(allowed))}",
-            fg="red",
-            err=True,
-        )
-        raise typer.Exit(1)
-    return normalized  # type: ignore[return-value]
-
-
-def _parse_agent_mode(value: str) -> AgentMode:
-    allowed = {"planner", "mock", "llm"}
-    normalized = value.strip().lower()
-    if normalized not in allowed:
-        typer.secho(
-            f"invalid --agent {value!r}; expected one of: "
-            f"{', '.join(sorted(allowed))}",
-            fg="red",
-            err=True,
-        )
-        raise typer.Exit(1)
-    return normalized  # type: ignore[return-value]
 
 
 def _display_route(url: str | None) -> str:

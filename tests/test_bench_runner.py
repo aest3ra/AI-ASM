@@ -1,3 +1,4 @@
+import yaml
 from sqlmodel import Session
 
 from bench.run_bench import (
@@ -10,6 +11,7 @@ from bench.run_bench import (
     result_markdown,
     scan_command,
     select_targets,
+    write_bench_scan_config,
 )
 from ai_asm.storage.db import Endpoint, StaticCandidate, open_db
 
@@ -40,9 +42,33 @@ def test_bench_scan_command_includes_core_overrides(tmp_path):
     assert command[:4] == ["uv", "run", "ai-asm", "scan"]
     assert "--db" in command
     assert "--out" in command
-    assert command[command.index("--agent") + 1] == "mock"
-    assert command[command.index("--agent-budget") + 1] == "24"
-    assert "--form-data" in command
+    assert "--agent" not in command
+    assert "--agent-budget" not in command
+    assert "--form-data" not in command
+    generated_config = tmp_path / "scan.config.yaml"
+    assert command[4] == str(generated_config)
+    assert generated_config.exists()
+
+    data = yaml.safe_load(generated_config.read_text())
+    assert data["agent"]["mode"] == "mock"
+    assert data["agent"]["max_steps_per_page"] == 24
+    assert data["agent"]["form_data_path"].endswith("testdata/forms/default.yaml")
+
+
+def test_bench_write_scan_config_can_apply_static_probe_auth(tmp_path):
+    path = write_bench_scan_config(
+        {
+            "scan_config": "examples/crapi_scan_config.yaml",
+            "agent": "planner",
+            "static_probe_auth": "learned",
+        },
+        run_dir=tmp_path,
+        agent=None,
+    )
+
+    data = yaml.safe_load(path.read_text())
+    assert data["static_probe_auth"] == "learned"
+    assert data["agent"]["mode"] == "planner"
 
 
 def test_bench_path_list_coverage_uses_endpoint_and_static_candidates(tmp_path):

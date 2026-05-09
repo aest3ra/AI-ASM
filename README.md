@@ -43,8 +43,6 @@ runs/
 uv run ai-asm scan examples/scan_config.yaml \
     --db ./scans/run1.db \
     --out ./scans/run1 \
-    --agent planner \
-    --form-data testdata/forms/default.yaml \
     --only-dynamic         # static 자산 제외, XHR/Fetch/Document만 표시
     --no-headless          # 브라우저 창을 띄워서 동작 관찰
 
@@ -131,10 +129,10 @@ src/ai_asm/
 | `agent.max_steps_per_page` | 페이지당 agent tool step cap |
 | `agent.form_data_path` | form test data YAML 경로 |
 
-CLI에서 일회성으로 바꿀 수도 있다.
+인증 파일은 CLI에서 일회성으로 바꿀 수 있다.
 
 ```bash
-uv run ai-asm scan examples/scan_config.yaml --auth auth.json --static-probe-auth learned
+uv run ai-asm scan examples/scan_config.yaml --auth auth.json
 ```
 
 ## 테스트

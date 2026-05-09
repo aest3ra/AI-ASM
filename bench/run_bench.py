@@ -209,28 +209,53 @@ def scan_command(
     out_dir: Path,
     agent: str | None,
 ) -> list[str]:
+    scan_config = write_bench_scan_config(
+        target,
+        run_dir=db_path.parent,
+        agent=agent,
+    )
     command = [
         "uv",
         "run",
         "ai-asm",
         "scan",
-        str(resolve_path(target["scan_config"])),
+        str(scan_config),
         "--db",
         str(db_path),
         "--out",
         str(out_dir),
-        "--agent",
-        agent or str(target.get("agent") or "planner"),
     ]
-    if target.get("agent_budget"):
-        command.extend(["--agent-budget", str(target["agent_budget"])])
-    if target.get("form_data"):
-        command.extend(["--form-data", str(resolve_path(target["form_data"]))])
     if target.get("auth"):
         command.extend(["--auth", str(resolve_path(target["auth"]))])
-    if target.get("static_probe_auth"):
-        command.extend(["--static-probe-auth", str(target["static_probe_auth"])])
     return command
+
+
+def write_bench_scan_config(
+    target: dict[str, Any],
+    *,
+    run_dir: Path,
+    agent: str | None,
+) -> Path:
+    source = resolve_path(target["scan_config"])
+    raw = yaml.safe_load(source.read_text()) or {}
+    if not isinstance(raw, dict):
+        raise BenchError(f"invalid scan config: {source}")
+
+    if target.get("static_probe_auth"):
+        raw["static_probe_auth"] = str(target["static_probe_auth"])
+
+    agent_config = dict(raw.get("agent") or {})
+    agent_config["mode"] = agent or str(target.get("agent") or agent_config.get("mode") or "planner")
+    if target.get("agent_budget"):
+        agent_config["max_steps_per_page"] = int(target["agent_budget"])
+    if target.get("form_data"):
+        agent_config["form_data_path"] = str(resolve_path(target["form_data"]))
+    raw["agent"] = agent_config
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    out_path = run_dir / "scan.config.yaml"
+    out_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return out_path
 
 
 def check_health(url: str) -> None:
