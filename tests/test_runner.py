@@ -191,6 +191,27 @@ def test_dangerous_url_blocked_at_enqueue():
     assert diag.template_seen == {}
 
 
+def test_download_url_blocked_at_enqueue_but_not_counted_as_danger():
+    crawler = _make_crawler(cap=3)
+    diag = ScanDiagnostics()
+    queue: deque[str] = deque()
+    seen: set[str] = set()
+
+    crawler._try_enqueue(
+        "https://x.test/ilos/co/file_download.acl?FILE_SEQ=1",
+        queue,
+        seen,
+        diag,
+        cap=3,
+    )
+
+    assert len(queue) == 0
+    assert diag.links_enqueued == 0
+    assert diag.links_skipped_file == 1
+    assert diag.links_skipped_danger == 0
+    assert diag.template_seen == {}
+
+
 def test_hash_and_path_spa_routes_are_not_enqueued_twice():
     crawler = _make_crawler(cap=3)
     diag = ScanDiagnostics()

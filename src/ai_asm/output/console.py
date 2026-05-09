@@ -8,6 +8,7 @@ from rich import print
 from rich.table import Table
 
 from ai_asm.analyzer.dispatcher import DispatchStats
+from ai_asm.crawler.probe import static_probe_skip_reason
 from ai_asm.crawler.scope import Scope
 from ai_asm.crawler.types import CapturedRequest, ScanDiagnostics
 from ai_asm.normalizer import ApiCandidate, NormalizedEndpoint
@@ -32,7 +33,12 @@ def print_scan_result(
     print_url_surface_summary(result.url_surfaces)
     print_diagnostics(result.diagnostics, max_visits_per_template)
     print_dispatcher_stats(result.dispatcher.stats, result.pending_candidates)
-    print_static_candidates(result.static_candidates, result.endpoints)
+    print_static_candidates(
+        result.static_candidates,
+        result.endpoints,
+        result.probed_urls,
+        result.probe_errors,
+    )
     if result.excluded_count:
         print(
             f"[dim]excluded {result.excluded_count} out-of-scope raw requests "
@@ -105,6 +111,7 @@ def print_diagnostics(diag: ScanDiagnostics, cap: int) -> None:
     table.add_row(f"links capped (template hit ≥{cap})", str(diag.links_skipped_template_cap))
     table.add_row("links skipped (external redirect)", str(diag.links_skipped_external_redirect))
     table.add_row("links skipped (danger)", str(diag.links_skipped_danger))
+    table.add_row("links skipped (file/download)", str(diag.links_skipped_file))
     table.add_row("buttons clicked", str(diag.buttons_clicked))
     table.add_row("buttons skipped (danger)", str(diag.buttons_skipped_danger))
     table.add_row("POST forms submitted", str(diag.forms_submitted))
@@ -196,7 +203,11 @@ def print_dispatcher_stats(stats: DispatchStats, pending_candidates: int) -> Non
 def print_static_candidates(
     candidates: list[ApiCandidate],
     endpoints: list[NormalizedEndpoint],
+    probed_urls: set[str] | None = None,
+    probe_errors: dict[str, str] | None = None,
 ) -> None:
+    probed_urls = probed_urls or set()
+    probe_errors = probe_errors or {}
     observed = {(e.host, e.path_template) for e in endpoints}
     new_candidates = [
         c for c in candidates if (c.host, c.path_template) not in observed
@@ -211,9 +222,34 @@ def print_static_candidates(
     )
     table.add_column("host")
     table.add_column("path", overflow="fold")
+    table.add_column("probe")
     table.add_column("source", overflow="fold")
     for c in new_candidates[:50]:
-        table.add_row(c.host, c.path_template, c.source_url)
+        table.add_row(
+            c.host,
+            c.path_template,
+            _probe_status(c, probed_urls, probe_errors),
+            c.source_url,
+        )
     print(table)
     if len(new_candidates) > 50:
         print(f"[dim]... {len(new_candidates) - 50} more static candidates[/dim]")
+
+
+def _probe_status(
+    candidate: ApiCandidate,
+    probed_urls: set[str],
+    probe_errors: dict[str, str],
+) -> str:
+    if candidate.sample_url in probed_urls:
+        return "probed"
+    if candidate.sample_url in probe_errors:
+        return f"error: {probe_errors[candidate.sample_url]}"
+    reason = static_probe_skip_reason(candidate.sample_url)
+    if reason == "danger":
+        return "not probed: danger"
+    if reason == "download":
+        return "not probed: file/download"
+    if reason:
+        return f"not probed: {reason}"
+    return "not probed: cap"

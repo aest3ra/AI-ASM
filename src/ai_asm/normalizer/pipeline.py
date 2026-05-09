@@ -9,6 +9,7 @@ from ai_asm.crawler.types import CapturedRequest
 from ai_asm.normalizer.params import extract_all, infer_type
 from ai_asm.normalizer.types import NormalizedEndpoint, NormalizedParameter
 from ai_asm.normalizer.url import templatize_path
+from ai_asm.safety import is_download_url
 
 MAX_SAMPLES_PER_PARAM = 5
 API_PREFIXES = ("/api", "/api-", "/api_", "/rest", "/graphql", "/b2b")
@@ -30,6 +31,17 @@ STATIC_SUFFIXES = (
     ".woff2",
     ".ttf",
     ".map",
+)
+STATIC_MIME_PREFIXES = (
+    "image/",
+    "font/",
+    "audio/",
+    "video/",
+)
+STATIC_MIME_MARKERS = (
+    "javascript",
+    "text/css",
+    "octet-stream",
 )
 
 
@@ -89,10 +101,18 @@ def is_api_capture(req: CapturedRequest) -> bool:
         return False
     if lowered.endswith(STATIC_SUFFIXES):
         return False
+    if is_download_url(req.url):
+        return False
     if API_MARKER_RE.search(lowered):
         return True
     mime = (req.response_mime or "").lower()
     if "json" in mime:
+        return True
+    if (
+        req.resource_type in {"XHR", "Fetch"}
+        and req.method.upper() not in {"GET", "HEAD"}
+        and not _looks_static_mime(mime)
+    ):
         return True
     if req.resource_type in {"XHR", "Fetch"} and "json" in mime:
         return True
@@ -101,6 +121,13 @@ def is_api_capture(req: CapturedRequest) -> bool:
         and mime.startswith("text/plain")
         and lowered != "/"
         and "." not in lowered.rsplit("/", 1)[-1]
+    )
+
+
+def _looks_static_mime(mime: str) -> bool:
+    return (
+        any(mime.startswith(prefix) for prefix in STATIC_MIME_PREFIXES)
+        or any(marker in mime for marker in STATIC_MIME_MARKERS)
     )
 
 

@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from ai_asm.crawler.scope import Scope
 from ai_asm.crawler.types import FrontierItem, ScanDiagnostics
 from ai_asm.normalizer.url import templatize_path
-from ai_asm.safety import is_dangerous_url
+from ai_asm.safety import is_dangerous_url, is_download_url
 from ai_asm.storage.db import FrontierState
 from ai_asm.storage.repo import (
     complete_frontier_item,
@@ -140,6 +140,9 @@ class FrontierManager:
             return
         if is_dangerous_url(url):
             diag.links_skipped_danger += 1
+            return
+        if is_download_url(url):
+            diag.links_skipped_file += 1
             return
         if has_out_of_scope_redirect_target(url, self.scope):
             diag.links_skipped_external_redirect += 1

@@ -90,6 +90,36 @@ def test_unobserved_post_forms_stay_action_routes_without_api_evidence():
     assert by_path[("POST", "/api/search")].route_kind == "api_endpoint"
 
 
+def test_download_like_acl_routes_are_file_surface_not_page_routes():
+    surfaces = discover_url_surfaces([
+        CapturedRequest(
+            request_id="file",
+            method="GET",
+            url="https://example.com/ilos/co/file_download.acl?FILE_SEQ=1",
+            resource_type="Document",
+            response_status=200,
+            response_mime="text/html",
+        )
+    ], _scope())
+
+    assert surfaces[0].route_kind == "file"
+
+
+def test_observed_post_xhr_html_is_api_endpoint_surface():
+    surfaces = discover_url_surfaces([
+        CapturedRequest(
+            request_id="xhr",
+            method="POST",
+            url="https://example.com/ilos/main/main_schedule.acl",
+            resource_type="XHR",
+            response_status=200,
+            response_mime="text/html",
+        )
+    ], _scope())
+
+    assert surfaces[0].route_kind == "api_endpoint"
+
+
 def test_save_url_surfaces_merges_same_route(tmp_path):
     engine = open_db(tmp_path / "surface.db")
     with Session(engine) as session:

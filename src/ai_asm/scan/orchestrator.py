@@ -64,6 +64,8 @@ class ScanRunResult:
     scoped_captured: list[CapturedRequest]
     endpoints: list[NormalizedEndpoint]
     static_candidates: list[ApiCandidate]
+    probed_urls: set[str]
+    probe_errors: dict[str, str]
     url_surfaces: list[UrlSurfaceRecord]
     diagnostics: ScanDiagnostics
     dispatcher: AnalyzerDispatcher
@@ -221,6 +223,8 @@ class ScanOrchestrator:
             scoped_captured=scoped_captured,
             endpoints=endpoints,
             static_candidates=static_candidates,
+            probed_urls=probed_urls,
+            probe_errors=probe_errors,
             url_surfaces=url_surfaces,
             diagnostics=scan_diag,
             dispatcher=dispatcher,

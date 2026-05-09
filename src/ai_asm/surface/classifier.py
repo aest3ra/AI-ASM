@@ -12,6 +12,7 @@ from ai_asm.crawler.types import CapturedRequest
 from ai_asm.normalizer.pipeline import API_MARKER_RE, canonical_api_path
 from ai_asm.normalizer.static import ApiCandidate
 from ai_asm.normalizer.url import templatize_path
+from ai_asm.safety import is_download_url
 
 RouteKind = str
 
@@ -162,10 +163,12 @@ def classify_url(
         kind = "asset"
         score -= 5
         signals.append("asset_suffix")
-    elif lowered_path.endswith(FILE_SUFFIXES):
+    elif lowered_path.endswith(FILE_SUFFIXES) or is_download_url(url):
         kind = "file"
         score -= 2
-        signals.append("file_suffix")
+        signals.append(
+            "file_suffix" if lowered_path.endswith(FILE_SUFFIXES) else "download_url",
+        )
     else:
         strong_api_signal = False
         if API_MARKER_RE.search(lowered_path):
@@ -196,7 +199,13 @@ def classify_url(
             score -= 4
             signals.append("html_mime")
 
-        if source_kind in {"html_form", "html_action_link"} and not strong_api_signal:
+        if (
+            observed
+            and resource_type in {"XHR", "Fetch"}
+            and method not in {"GET", "HEAD"}
+        ):
+            kind = "api_endpoint"
+        elif source_kind in {"html_form", "html_action_link"} and not strong_api_signal:
             kind = "action_route"
         elif score >= 4:
             kind = "api_endpoint"

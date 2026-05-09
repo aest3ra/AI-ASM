@@ -25,6 +25,17 @@ DANGER_KEYWORDS = {
     "삭제",
 }
 
+DOWNLOAD_KEYWORDS = {
+    "download",
+    "file_down",
+    "file-download",
+    "file_download",
+    "attach_down",
+    "attachment",
+    "첨부",
+    "다운로드",
+}
+
 
 def matched_keyword(text: str, keywords: set[str]) -> str | None:
     lowered = text.lower()
@@ -36,14 +47,26 @@ def matched_keyword(text: str, keywords: set[str]) -> str | None:
 
 def dangerous_url_keyword(url: str) -> str | None:
     """Return the matched dangerous keyword for URLs we should not actively hit."""
-    parsed = urlparse(url)
-    text = unquote(" ".join(part for part in (
-        parsed.path,
-        parsed.query,
-        parsed.fragment,
-    ) if part))
-    return matched_keyword(text, DANGER_KEYWORDS)
+    return matched_keyword(_url_surface_text(url), DANGER_KEYWORDS)
 
 
 def is_dangerous_url(url: str) -> bool:
     return dangerous_url_keyword(url) is not None
+
+
+def download_url_keyword(url: str) -> str | None:
+    """Return the matched download keyword for URLs we should not page-crawl."""
+    return matched_keyword(_url_surface_text(url), DOWNLOAD_KEYWORDS)
+
+
+def is_download_url(url: str) -> bool:
+    return download_url_keyword(url) is not None
+
+
+def _url_surface_text(url: str) -> str:
+    parsed = urlparse(url)
+    return unquote(" ".join(part for part in (
+        parsed.path,
+        parsed.query,
+        parsed.fragment,
+    ) if part))

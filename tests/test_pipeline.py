@@ -134,3 +134,30 @@ def test_is_api_capture_accepts_api_internal_without_response_mime():
         resource_type="Fetch",
         response_mime=None,
     ))
+
+
+def test_is_api_capture_accepts_post_xhr_html_action_endpoint():
+    assert is_api_capture(cap(
+        "POST",
+        "https://x/ilos/main/main_schedule.acl",
+        resource_type="XHR",
+        response_mime="text/html",
+    ))
+
+
+def test_is_api_capture_does_not_accept_get_xhr_html_fragment_by_default():
+    assert not is_api_capture(cap(
+        "GET",
+        "https://x/ilos/message/received_list_pop_form.acl",
+        resource_type="XHR",
+        response_mime="text/html;charset=utf-8",
+    ))
+
+
+def test_is_api_capture_does_not_accept_download_routes():
+    assert not is_api_capture(cap(
+        "GET",
+        "https://x/ilos/co/file_download.acl?FILE_SEQ=1",
+        resource_type="Document",
+        response_mime="text/html",
+    ))

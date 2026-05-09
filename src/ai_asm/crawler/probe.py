@@ -13,7 +13,7 @@ from ai_asm.config import AuthConfig
 from ai_asm.crawler.scope import Scope
 from ai_asm.crawler.types import CapturedRequest, StaticProbeAuthProfile
 from ai_asm.normalizer.static import ApiCandidate
-from ai_asm.safety import is_dangerous_url
+from ai_asm.safety import is_dangerous_url, is_download_url
 
 MAX_STATIC_GET_PROBES = 25
 StaticProbeAuthMode = Literal["none", "cookie-only", "learned"]
@@ -199,14 +199,20 @@ def _probeable_candidates(candidates: list[ApiCandidate]) -> list[ApiCandidate]:
 
 
 def _is_probeable_url(url: str) -> bool:
+    return static_probe_skip_reason(url) is None
+
+
+def static_probe_skip_reason(url: str) -> str | None:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        return False
+        return "scheme"
     if any(token in url for token in ("{", "}", "$", "`", "${", "<", ">")):
-        return False
+        return "template"
     if is_dangerous_url(url):
-        return False
-    return True
+        return "danger"
+    if is_download_url(url):
+        return "download"
+    return None
 
 
 def _learnable_auth_headers(headers: dict[str, str]) -> dict[str, str]:
