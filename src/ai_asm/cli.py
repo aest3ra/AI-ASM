@@ -497,16 +497,6 @@ async def _login_flow(url: str, out_path: Path) -> None:
     )
 
 
-@app.command()
-def serve(
-    db_path: Path = typer.Option(Path("asm.db"), "--db"),
-    host: str = "127.0.0.1",
-    port: int = 8000,
-) -> None:
-    """Serve the result viewer (not yet implemented)."""
-    print(f"[yellow]viewer not yet implemented (Day 11+); db={db_path} host={host} port={port}[/yellow]")
-
-
 def main() -> None:
     app()
 

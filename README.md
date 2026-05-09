@@ -107,7 +107,7 @@ src/ai_asm/
 ├── storage/
 │   ├── db.py               SQLite 스키마
 │   └── repo.py             save_endpoints
-└── viewer/                 후속
+└── surface/                URL surface 분류
 ```
 
 ## Config 예시
