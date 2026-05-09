@@ -167,6 +167,14 @@ def test_flagged_command_writes_yaml_export(tmp_path: Path):
     assert rows[0]["flag_kind"] == "track1_scope"
 
 
+def test_login_help_shows_short_out_alias():
+    result = runner.invoke(app, ["login", "--help"])
+
+    assert result.exit_code == 0
+    assert "-o" in result.output
+    assert "--out" in result.output
+
+
 def test_default_scan_outputs_write_openapi_and_flagged_files(tmp_path: Path):
     db_path = tmp_path / "asm.db"
     out_dir = tmp_path / "run"

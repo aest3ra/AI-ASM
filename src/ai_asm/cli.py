@@ -365,7 +365,7 @@ def inspect(
 @app.command()
 def login(
     target_url: str = typer.Argument(..., help="URL to open for the login flow."),
-    out: Path = typer.Option(Path("auth.json"), "--out"),
+    out: Path = typer.Option(Path("auth.json"), "-o", "--out"),
 ) -> None:
     """Open a headed browser, let the user authenticate, save the session state.
 
