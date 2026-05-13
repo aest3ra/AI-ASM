@@ -2,12 +2,12 @@ import asyncio
 
 from sqlmodel import Session, select
 
-from ai_asm.agent.budget import BudgetExceeded, BudgetTracker
-from ai_asm.agent.tools import ToolCall, ToolExecutor
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.scope import Scope
-from ai_asm.shared.decision_trace import DecisionTrace
-from ai_asm.storage.db import FlaggedItem, Scan, open_db
+from orbis.agent.budget import BudgetExceeded, BudgetTracker
+from orbis.agent.tools import ToolCall, ToolExecutor
+from orbis.config import ScopeConfig
+from orbis.crawler.scope import Scope
+from orbis.shared.decision_trace import DecisionTrace
+from orbis.storage.db import FlaggedItem, Scan, open_db
 
 
 class FakeToolPage:

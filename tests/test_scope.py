@@ -1,7 +1,7 @@
 import pytest
 
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.scope import Scope
+from orbis.config import ScopeConfig
+from orbis.crawler.scope import Scope
 
 
 @pytest.fixture

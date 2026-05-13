@@ -1,5 +1,5 @@
 [project]
-name = "ai-asm"
+name = "orbis"
 version = "0.1.0"
 description = "Bug bounty attack surface mapper — automated endpoint, parameter, and header discovery."
 authors = [
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ai-asm = "ai_asm.cli:main"
+orbis = "orbis.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -25,6 +25,9 @@ pythonpath = ["src"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orbis"]
 
 [dependency-groups]
 dev = [

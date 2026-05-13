@@ -1,14 +1,14 @@
 import yaml
 from sqlmodel import Session, select
 
-from ai_asm.normalizer.types import NormalizedEndpoint, NormalizedParameter
-from ai_asm.output.openapi import openapi_from_db, openapi_to_yaml
-from ai_asm.storage.db import Parameter, Scan, open_db
-from ai_asm.storage.repo import save_endpoints
+from orbis.normalizer.types import NormalizedEndpoint, NormalizedParameter
+from orbis.output.openapi import openapi_from_db, openapi_to_yaml
+from orbis.storage.db import Parameter, Scan, open_db
+from orbis.storage.repo import save_endpoints
 
 
 def test_openapi_export_includes_params_body_and_response_schema(tmp_path):
-    db_path = tmp_path / "asm.db"
+    db_path = tmp_path / "orbis.db"
     engine = open_db(db_path)
     with Session(engine) as session:
         scan = Scan(target="https://example.com/")
@@ -74,7 +74,7 @@ def test_openapi_export_includes_params_body_and_response_schema(tmp_path):
 
 
 def test_openapi_export_can_filter_by_last_seen_scan(tmp_path):
-    db_path = tmp_path / "asm.db"
+    db_path = tmp_path / "orbis.db"
     engine = open_db(db_path)
     with Session(engine) as session:
         scan1 = Scan(target="https://example.com/")
@@ -109,7 +109,7 @@ def test_openapi_export_can_filter_by_last_seen_scan(tmp_path):
 
 
 def test_openapi_parameter_merge_does_not_mutate_db_rows(tmp_path):
-    db_path = tmp_path / "asm.db"
+    db_path = tmp_path / "orbis.db"
     engine = open_db(db_path)
     with Session(engine) as session:
         scan = Scan(target="https://example.com/")

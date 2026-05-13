@@ -1,4 +1,4 @@
-from ai_asm.agent.planner import plan_local_actions
+from orbis.agent.planner import plan_local_actions
 
 
 def test_local_planner_fills_visible_form_then_clicks_submit():

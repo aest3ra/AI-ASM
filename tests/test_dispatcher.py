@@ -1,12 +1,12 @@
 import asyncio
 
-from ai_asm.analyzer.dispatcher import AnalyzerDispatcher, DispatcherLimits
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import CapturedRequest
-from ai_asm.shared.candidate_store import CandidateStore
-from ai_asm.shared.decision_trace import DecisionTrace
-from ai_asm.shared.response_store import ResponseStore
+from orbis.analyzer.dispatcher import AnalyzerDispatcher, DispatcherLimits
+from orbis.config import ScopeConfig
+from orbis.crawler.scope import Scope
+from orbis.crawler.types import CapturedRequest
+from orbis.shared.candidate_store import CandidateStore
+from orbis.shared.decision_trace import DecisionTrace
+from orbis.shared.response_store import ResponseStore
 
 
 def _cap(

@@ -1,7 +1,7 @@
 import pytest
 
-from ai_asm.crawler.types import CapturedRequest
-from ai_asm.normalizer.params import (
+from orbis.crawler.types import CapturedRequest
+from orbis.normalizer.params import (
     extract_all,
     extract_body,
     extract_cookies,

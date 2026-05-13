@@ -1,7 +1,7 @@
 import asyncio
 import json
 
-from ai_asm.agent.client import OpenAIClient, _compact_context, load_openai_api_key
+from orbis.agent.client import OpenAIClient, _compact_context, load_openai_api_key
 
 
 class FakeUsageDetails:

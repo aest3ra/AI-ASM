@@ -1,4 +1,4 @@
-from ai_asm.agent.form_data import FormDataSet
+from orbis.agent.form_data import FormDataSet
 
 
 def test_form_data_loads_defaults_and_field_overrides(tmp_path):
@@ -43,6 +43,6 @@ def test_form_data_uses_visible_text_as_lookup_key():
 def test_form_data_infers_semantic_defaults_from_text_inputs():
     data = FormDataSet()
 
-    assert data.value_for_field({"type": "text", "name": "email"}) == "ai-asm@example.com"
+    assert data.value_for_field({"type": "text", "name": "email"}) == "orbis@example.com"
     assert data.value_for_field({"type": "text", "name": "phone"}) == "5551234567"
     assert data.value_for_field({"type": "text", "name": "linkedin"}) == "https://example.com"

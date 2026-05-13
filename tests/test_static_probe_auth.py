@@ -1,10 +1,10 @@
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.probe import (
+from orbis.config import ScopeConfig
+from orbis.crawler.probe import (
     headers_for_static_probe,
     learn_static_probe_auth_profiles,
 )
-from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import CapturedRequest
+from orbis.crawler.scope import Scope
+from orbis.crawler.types import CapturedRequest
 
 
 def _scope() -> Scope:

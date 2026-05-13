@@ -2,7 +2,7 @@
 
 ## v0.1.0 - 2026-05-09
 
-Initial usable release of `ai-asm` as an API surface reconstruction tool.
+Initial usable release of `orbis` as an API surface reconstruction tool.
 
 ### Added
 - Playwright/CDP based scanner with strict scope enforcement.
@@ -12,15 +12,17 @@ Initial usable release of `ai-asm` as an API surface reconstruction tool.
 - URL surface classification separate from verified API endpoints.
 - SQLite result store with auth-context-aware endpoint deduplication.
 - Per-scan automatic output layout:
-  - `runs/<timestamp>_<host>_<hash>.db`
+  - `runs/orbis-<timestamp>_<host>_<hash>.db`
   - matching artifact directory
+  - `orbis-scan-{id}-{ts}.json`
+  - `orbis-requests-{id}.jsonl`
+  - `orbis-trace-{id}.jsonl`
   - `api.yaml`
   - `flagged.yaml`
   - `flagged.sh`
-- OpenAPI 3.0 export from observed endpoints and inferred response schemas.
-- Flagged item export for manual review in YAML, curl, HTTP Client, and Postman formats.
+- OpenAPI 3.0 YAML generation from observed endpoints and inferred response schemas.
+- Flagged item output for manual review in YAML and curl formats.
 - Request log, redacted raw capture artifact, and decision trace output.
-- Benchmark harness and local candidate service compose file.
 
 ### Notes
 - `planner` is the default agent mode.

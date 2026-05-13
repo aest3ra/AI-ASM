@@ -1,6 +1,6 @@
 import asyncio
 
-from ai_asm.agent.network import NetworkEventBuffer
+from orbis.agent.network import NetworkEventBuffer
 
 
 def test_network_event_buffer_returns_append_only_records_after_cursor():

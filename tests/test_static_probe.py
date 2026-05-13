@@ -1,4 +1,4 @@
-from ai_asm.crawler.probe import _is_probeable_url, static_probe_skip_reason
+from orbis.crawler.probe import _is_probeable_url, static_probe_skip_reason
 
 
 def test_static_probe_skips_dangerous_urls():

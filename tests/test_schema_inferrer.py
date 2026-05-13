@@ -1,4 +1,4 @@
-from ai_asm.schema.inferrer import (
+from orbis.schema.inferrer import (
     infer_json_schema,
     infer_schema_from_json_bodies,
     merge_json_schemas,

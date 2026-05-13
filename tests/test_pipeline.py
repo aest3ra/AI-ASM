@@ -1,6 +1,6 @@
-from ai_asm.crawler.types import CapturedRequest
-from ai_asm.normalizer import normalize
-from ai_asm.normalizer.pipeline import is_api_capture
+from orbis.crawler.types import CapturedRequest
+from orbis.normalizer import normalize
+from orbis.normalizer.pipeline import is_api_capture
 
 
 def cap(method: str, url: str, **kw) -> CapturedRequest:

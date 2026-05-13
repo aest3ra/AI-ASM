@@ -3,15 +3,15 @@ import json
 import yaml
 from sqlmodel import Session
 
-from ai_asm.output.flagged import (
+from orbis.output.flagged import (
     load_flagged_items,
     render_curl,
     render_http,
     render_postman,
     render_yaml,
 )
-from ai_asm.storage.db import Scan, open_db
-from ai_asm.storage.repo import record_flagged_item
+from orbis.storage.db import Scan, open_db
+from orbis.storage.repo import record_flagged_item
 
 
 def test_flagged_yaml_export_preserves_context(tmp_path):
@@ -45,13 +45,13 @@ def test_flagged_postman_export_is_valid_collection(tmp_path):
 
     collection = json.loads(render_postman(items))
 
-    assert collection["info"]["name"] == "ai-asm flagged items"
+    assert collection["info"]["name"] == "orbis flagged items"
     assert collection["item"][0]["request"]["method"] == "POST"
     assert collection["item"][0]["request"]["header"][0]["key"] == "Cookie"
 
 
 def test_flagged_exports_warn_when_storage_state_cannot_be_loaded(tmp_path):
-    db_path = tmp_path / "asm.db"
+    db_path = tmp_path / "orbis.db"
     broken_auth = tmp_path / "broken.json"
     broken_auth.write_text("{")
     engine = open_db(db_path)
@@ -78,7 +78,7 @@ def test_flagged_exports_warn_when_storage_state_cannot_be_loaded(tmp_path):
 
 
 def _flagged_db(tmp_path):
-    db_path = tmp_path / "asm.db"
+    db_path = tmp_path / "orbis.db"
     auth_path = tmp_path / "auth.json"
     auth_path.write_text(json.dumps({
         "cookies": [

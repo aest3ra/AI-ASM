@@ -1,8 +1,8 @@
 import asyncio
 import time
 
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.browser import (
+from orbis.config import ScopeConfig
+from orbis.crawler.browser import (
     INIT_SCRIPT,
     _close_page_safely,
     _collect_dom_snapshot_capture,
@@ -11,8 +11,8 @@ from ai_asm.crawler.browser import (
     init_script_record_to_capture,
     should_abort_request,
 )
-from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import CapturedRequest
+from orbis.crawler.scope import Scope
+from orbis.crawler.types import CapturedRequest
 
 
 def test_should_abort_out_of_scope_active_http_requests():

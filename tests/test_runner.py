@@ -1,7 +1,7 @@
 from collections import deque
 
-from ai_asm.config import AuthConfig, LimitsConfig, ScopeConfig
-from ai_asm.crawler.runner import (
+from orbis.config import AuthConfig, LimitsConfig, ScopeConfig
+from orbis.crawler.runner import (
     Crawler,
     _frontier_seen_key,
     _has_out_of_scope_redirect_target,
@@ -9,8 +9,8 @@ from ai_asm.crawler.runner import (
     _template_key,
     normalize_url,
 )
-from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import FrontierItem, InteractionStats, ScanDiagnostics
+from orbis.crawler.scope import Scope
+from orbis.crawler.types import FrontierItem, InteractionStats, ScanDiagnostics
 
 
 def test_normalize_strips_plain_anchor():
@@ -282,7 +282,7 @@ def test_crawler_interactions_go_through_agent_driver(monkeypatch):
         return InteractionStats(buttons_seen=1, buttons_clicked=1)
 
     monkeypatch.setattr(
-        "ai_asm.crawler.runner.run_agent_interactions",
+        "orbis.crawler.runner.run_agent_interactions",
         fake_agent_driver,
     )
 

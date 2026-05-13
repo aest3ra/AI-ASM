@@ -8,8 +8,8 @@ from typing import Any
 
 from sqlmodel import Session, select
 
-from ai_asm.normalizer.pipeline import canonical_api_path
-from ai_asm.storage.db import Endpoint, StaticCandidate, open_db
+from orbis.normalizer.pipeline import canonical_api_path
+from orbis.storage.db import Endpoint, StaticCandidate, open_db
 
 PLACEHOLDER_RE = re.compile(r"\{[^/{}]+\}")
 API_MARKER_RE = re.compile(r"/(?:api|rest|graphql|b2b)(?=/|$)", re.IGNORECASE)
@@ -17,7 +17,7 @@ API_MARKER_RE = re.compile(r"/(?:api|rest|graphql|b2b)(?=/|$)", re.IGNORECASE)
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare ai-asm path discovery with an OpenAPI spec.",
+        description="Compare orbis path discovery with an OpenAPI spec.",
     )
     parser.add_argument("--db", required=True)
     parser.add_argument("--spec", required=True)

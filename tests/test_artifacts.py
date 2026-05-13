@@ -1,7 +1,7 @@
 import json
 
-from ai_asm.crawler.types import CapturedRequest
-from ai_asm.output.artifacts import capture_to_artifact, write_capture_artifact
+from orbis.crawler.types import CapturedRequest
+from orbis.output.artifacts import capture_to_artifact, write_capture_artifact
 
 
 def test_capture_artifact_redacts_sensitive_values(tmp_path):

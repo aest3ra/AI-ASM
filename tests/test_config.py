@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from ai_asm.config import load_config
+from orbis.config import load_config
 
 
 def write(tmp: Path, body: str) -> Path:
@@ -96,3 +96,13 @@ agent:
     assert cfg.agent.temperature == 0.2
     assert cfg.agent.max_steps_per_page == 7
     assert cfg.agent.form_data_path == Path("./forms.yaml")
+
+
+def test_hybrid_agent_mode_is_valid(tmp_path: Path):
+    cfg = load_config(write(tmp_path, """
+target: https://api.example.com
+agent:
+  mode: hybrid
+"""))
+
+    assert cfg.agent.mode == "hybrid"

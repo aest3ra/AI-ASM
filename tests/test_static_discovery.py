@@ -1,8 +1,8 @@
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import CapturedRequest
-from ai_asm.analyzer.js_ast import extract_candidates
-from ai_asm.normalizer.static import discover_api_candidates
+from orbis.config import ScopeConfig
+from orbis.crawler.scope import Scope
+from orbis.crawler.types import CapturedRequest
+from orbis.analyzer.js_ast import extract_candidates
+from orbis.normalizer.static import discover_api_candidates
 
 
 def cap(url: str, body: str, mime: str = "application/javascript") -> CapturedRequest:

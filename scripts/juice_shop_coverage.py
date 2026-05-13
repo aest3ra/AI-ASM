@@ -6,8 +6,8 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from ai_asm.normalizer.pipeline import canonical_api_path
-from ai_asm.storage.db import Endpoint, StaticCandidate, open_db
+from orbis.normalizer.pipeline import canonical_api_path
+from orbis.storage.db import Endpoint, StaticCandidate, open_db
 
 PLACEHOLDER_RE = re.compile(r"\{[^/{}]+\}")
 
@@ -93,9 +93,9 @@ PUBLIC_UNAUTH_GET_PATHS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare ai-asm results with the Juice Shop expected API path list.",
+        description="Compare orbis results with the Juice Shop expected API path list.",
     )
-    parser.add_argument("--db", default="asm.db")
+    parser.add_argument("--db", default="orbis.db")
     parser.add_argument(
         "--expected",
         default="tests/fixtures/juice_shop_expected_api_paths.txt",

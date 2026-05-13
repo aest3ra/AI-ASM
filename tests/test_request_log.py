@@ -1,7 +1,7 @@
 import json
 
-from ai_asm.crawler.types import CapturedRequest
-from ai_asm.output.request_log import write_request_log
+from orbis.crawler.types import CapturedRequest
+from orbis.output.request_log import write_request_log
 
 
 def test_write_request_log_jsonl(tmp_path):

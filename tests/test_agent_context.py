@@ -1,4 +1,4 @@
-from ai_asm.agent.context import ActionRecord, AgentMemory, NetworkDelta
+from orbis.agent.context import ActionRecord, AgentMemory, NetworkDelta
 
 
 def test_agent_memory_filters_failed_refs_by_stable_label():

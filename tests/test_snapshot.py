@@ -1,4 +1,4 @@
-from ai_asm.agent.snapshot import dom_signature_from_items
+from orbis.agent.snapshot import dom_signature_from_items
 
 
 def test_dom_signature_is_stable_for_equivalent_text_spacing():

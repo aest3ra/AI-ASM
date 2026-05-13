@@ -1,6 +1,6 @@
 import json
 
-from ai_asm.agent.behavior import analyze_trace_file
+from orbis.agent.behavior import analyze_trace_file
 
 
 def test_agent_behavior_detects_click_timeout_and_missing_feedback_loop(tmp_path):

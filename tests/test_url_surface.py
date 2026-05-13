@@ -1,12 +1,12 @@
 from sqlmodel import Session, select
 
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.scope import Scope
-from ai_asm.crawler.types import CapturedRequest
-from ai_asm.normalizer.static import ApiCandidate
-from ai_asm.storage.db import Scan, UrlSurface, open_db
-from ai_asm.storage.repo import save_url_surfaces
-from ai_asm.surface import discover_url_surfaces, surfaces_from_static_candidates
+from orbis.config import ScopeConfig
+from orbis.crawler.scope import Scope
+from orbis.crawler.types import CapturedRequest
+from orbis.normalizer.static import ApiCandidate
+from orbis.storage.db import Scan, UrlSurface, open_db
+from orbis.storage.repo import save_url_surfaces
+from orbis.surface import discover_url_surfaces, surfaces_from_static_candidates
 
 
 def _scope() -> Scope:

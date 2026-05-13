@@ -1,4 +1,4 @@
-from ai_asm.normalizer.params import extract_query
+from orbis.normalizer.params import extract_query
 
 
 def test_cache_buster_skipped():

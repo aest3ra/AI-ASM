@@ -1,10 +1,10 @@
 import asyncio
 
-from ai_asm.agent.budget import BudgetTracker
-from ai_asm.agent.client import AgentResponse, MockLLMClient
-from ai_asm.agent.loop import AgentLoop
-from ai_asm.agent.tools import ToolCall, ToolResult
-from ai_asm.shared.decision_trace import DecisionTrace
+from orbis.agent.budget import BudgetTracker
+from orbis.agent.client import AgentResponse, MockLLMClient
+from orbis.agent.loop import AgentLoop
+from orbis.agent.tools import ToolCall, ToolResult
+from orbis.shared.decision_trace import DecisionTrace
 
 
 class FakeExecutor:
@@ -88,7 +88,7 @@ def test_agent_loop_run_page_observes_between_single_actions():
             contexts.append(dict(state))
             return {"memory": dict(state)}
 
-        async def after_action(turn, call, result):
+        async def after_action(turn, call, result, source):
             after_calls.append((turn, call.name, result.ok))
             state["failed_refs"] = ["r1"]
             return True
@@ -118,6 +118,39 @@ def test_agent_loop_run_page_observes_between_single_actions():
     asyncio.run(run())
 
 
+def test_agent_loop_logs_turn_page_url_from_current_context():
+    async def run():
+        trace = DecisionTrace(scan_id=1)
+        executor = FakeExecutor()
+        client = MockLLMClient([
+            AgentResponse(tool_calls=[
+                ToolCall(id="1", name="give_up", arguments={"reason": "done"}),
+            ]),
+        ])
+
+        async def context_factory():
+            return {"page_url": "https://example.com/current"}
+
+        async def after_action(turn, call, result, source):
+            return True
+
+        await AgentLoop(
+            client=client,
+            executor=executor,
+            trace=trace,
+            page_url="https://example.com/stale",
+        ).run_page(
+            context_factory=context_factory,
+            after_action=after_action,
+            max_turns=1,
+        )
+
+        events = await trace.events()
+        assert events[0].page_url == "https://example.com/current"
+
+    asyncio.run(run())
+
+
 def test_agent_loop_run_page_batches_same_form_fields_then_submit_click():
     async def run():
         executor = FakeExecutor()
@@ -141,7 +174,7 @@ def test_agent_loop_run_page_batches_same_form_fields_then_submit_click():
         async def context_factory():
             return {}
 
-        async def after_action(turn, call, result):
+        async def after_action(turn, call, result, source):
             after_calls.append((turn, call.name, result.ok))
             return True
 
@@ -195,8 +228,8 @@ def test_agent_loop_run_page_uses_local_planner_before_llm():
                 ToolCall(id="local-2", name="click_ref", arguments={"ref": "login"}),
             ]
 
-        async def after_action(turn, call, result):
-            after_calls.append((turn, call.name, result.ok))
+        async def after_action(turn, call, result, source):
+            after_calls.append((turn, source, call.name, result.ok))
             return True
 
         result = await AgentLoop(
@@ -211,7 +244,10 @@ def test_agent_loop_run_page_uses_local_planner_before_llm():
 
         assert client.calls == []
         assert [call.name for call in executor.calls] == ["type_ref", "click_ref"]
-        assert after_calls == [(0, "type_ref", True), (0, "click_ref", True)]
+        assert after_calls == [
+            (0, "local_planner", "type_ref", True),
+            (0, "local_planner", "click_ref", True),
+        ]
         assert result.turns == 1
 
     asyncio.run(run())
@@ -232,7 +268,7 @@ def test_agent_loop_run_page_can_stop_after_no_progress():
         async def context_factory():
             return {}
 
-        async def after_action(turn, call, result):
+        async def after_action(turn, call, result, source):
             return False
 
         result = await AgentLoop(
@@ -267,7 +303,7 @@ def test_agent_loop_run_page_calls_before_action_right_before_execute():
         async def before_action(turn, call):
             events.append(("before", turn, call.name, len(executor.calls)))
 
-        async def after_action(turn, call, result):
+        async def after_action(turn, call, result, source):
             events.append(("after", turn, call.name, len(executor.calls)))
             return True
 

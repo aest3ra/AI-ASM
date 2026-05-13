@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ai_asm.agent.behavior import analyze_trace_file
+from orbis.agent.behavior import analyze_trace_file
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze ai-asm agent behavior from trace jsonl.",
+        description="Analyze orbis agent behavior from trace jsonl.",
     )
     parser.add_argument("trace", type=Path)
     args = parser.parse_args()

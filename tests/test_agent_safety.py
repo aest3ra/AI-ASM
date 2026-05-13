@@ -1,4 +1,4 @@
-from ai_asm.agent.safety import classify_form_text, safe_tool_arguments
+from orbis.agent.safety import classify_form_text, safe_tool_arguments
 
 
 def test_classify_form_text_uses_shared_form_kind_rules():

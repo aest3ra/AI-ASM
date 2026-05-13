@@ -2,12 +2,13 @@ import asyncio
 
 from sqlmodel import Session, select
 
-from ai_asm.agent.client import HeuristicMockLLMClient
-from ai_asm.agent.context import AgentMemory, NetworkDelta
-from ai_asm.agent.driver import (
+from orbis.agent.client import AgentResponse, HeuristicMockLLMClient
+from orbis.agent.context import AgentMemory, NetworkDelta
+from orbis.agent.driver import (
     AgentObservation,
     PlaywrightToolPage,
     _exploration_status,
+    endpoint_surface_key,
     _form_status,
     _form_memory_key,
     _made_meaningful_progress,
@@ -16,13 +17,13 @@ from ai_asm.agent.driver import (
     run_agent_interactions,
     run_mock_agent_interactions,
 )
-from ai_asm.agent.form_data import FormDataSet
-from ai_asm.agent.network import NetworkEventBuffer
-from ai_asm.agent.tools import ToolCall, ToolResult
-from ai_asm.config import ScopeConfig
-from ai_asm.crawler.scope import Scope
-from ai_asm.shared.decision_trace import DecisionTrace
-from ai_asm.storage.db import FlaggedItem, Scan, open_db
+from orbis.agent.form_data import FormDataSet
+from orbis.agent.network import NetworkEventBuffer
+from orbis.agent.tools import ToolCall, ToolResult
+from orbis.config import ScopeConfig
+from orbis.crawler.scope import Scope
+from orbis.shared.decision_trace import DecisionTrace
+from orbis.storage.db import FlaggedItem, Scan, open_db
 
 
 def test_heuristic_mock_client_emits_safe_tools_from_snapshot():
@@ -128,7 +129,7 @@ class FakePage:
                     },
                 ],
             }
-        if "data-ai-asm-ref" in script:
+        if "data-orbis-ref" in script:
             self.actions.append(("submit_form", arg))
             return {"ok": True}
         return None
@@ -180,6 +181,22 @@ class ButtonOnlyNetworkPage(NetworkRecordingPage):
         return None
 
 
+class PollingNetworkLocator(FakeLocator):
+    async def click(self, **kwargs):
+        self.page.network_events.record(
+            method="GET",
+            url="https://example.com/api/poll",
+            resource_type="XHR",
+        )
+        await super().click(**kwargs)
+
+
+class PollingNetworkPage(ButtonOnlyNetworkPage):
+    def locator(self, selector):
+        ref = selector.split('"')[1]
+        return PollingNetworkLocator(self, ref)
+
+
 class EmptyPage(FakePage):
     async def evaluate(self, script, arg=None):
         if "window.__aiAsmAgentRoutes" in script:
@@ -216,9 +233,38 @@ class AmbiguousPage(FakePage):
         return None
 
 
+class NoProgressNavPage(FakePage):
+    async def evaluate(self, script, arg=None):
+        if "window.__aiAsmAgentRoutes" in script:
+            if "window.__aiAsmAgentRoutes || []" in script:
+                return []
+            return None
+        if "document.querySelectorAll" in script:
+            return {
+                "url": self.url,
+                "refs": [
+                    {
+                        "ref": "r1",
+                        "tag": "a",
+                        "text": "Dashboard",
+                        "href": "/dashboard",
+                    },
+                    {
+                        "ref": "r2",
+                        "tag": "a",
+                        "text": "Profile",
+                        "href": "/profile",
+                    },
+                ],
+            }
+        if "__aiAsmRequests" in script:
+            return []
+        return None
+
+
 class RedirectingFormPage(FakePage):
     async def evaluate(self, script, arg=None):
-        if isinstance(arg, dict) and "data-ai-asm-ref" in script:
+        if isinstance(arg, dict) and "data-orbis-ref" in script:
             self.actions.append(("submit_form", arg))
             return {"ok": False, "error": "redirected form response"}
         return await super().evaluate(script, arg)
@@ -291,7 +337,7 @@ class FileInputLocator(FakeLocator):
 
 class FileInputPage(FakePage):
     def locator(self, selector):
-        if "data-ai-asm-file-input" in selector:
+        if "data-orbis-file-input" in selector:
             return FileInputLocator(self, "file-token")
         ref = selector.split('"')[1]
         return FileInputLocator(self, ref)
@@ -349,9 +395,9 @@ def test_playwright_tool_page_attaches_placeholder_file_inputs():
         action, ref, files = page.actions[1]
         assert action == "set_input_files"
         assert ref == "file-token"
-        assert files[0]["name"] == "ai-asm-placeholder.txt"
+        assert files[0]["name"] == "orbis-placeholder.txt"
         assert files[0]["mimeType"] == "text/plain"
-        assert files[0]["buffer"] == b"ai-asm dry-run placeholder file"
+        assert files[0]["buffer"] == b"orbis dry-run placeholder file"
 
     asyncio.run(run())
 
@@ -387,7 +433,7 @@ def test_agent_driver_logs_llm_failures(monkeypatch):
             raise RuntimeError("api down")
 
     async def run():
-        monkeypatch.setattr("ai_asm.agent.driver.OpenAIClient", FailingOpenAIClient)
+        monkeypatch.setattr("orbis.agent.driver.OpenAIClient", FailingOpenAIClient)
         trace = DecisionTrace(scan_id=1)
 
         stats = await run_agent_interactions(
@@ -405,6 +451,139 @@ def test_agent_driver_logs_llm_failures(monkeypatch):
     asyncio.run(run())
 
 
+def test_agent_driver_llm_mode_does_not_run_local_planner(monkeypatch):
+    class FakeOpenAIClient:
+        calls = []
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def complete(self, context):
+            self.calls.append(context)
+            return AgentResponse(
+                tool_calls=[
+                    ToolCall(id="llm-get", name="get_text", arguments={"ref": "r1"}),
+                ],
+                input_tokens=11,
+                output_tokens=3,
+            )
+
+    async def run():
+        monkeypatch.setattr("orbis.agent.driver.OpenAIClient", FakeOpenAIClient)
+        trace = DecisionTrace(scan_id=1)
+        page = FakePage()
+
+        stats = await run_agent_interactions(
+            page,
+            scope=Scope(ScopeConfig(include_domains=["example.com"])),
+            mode="llm",
+            max_steps=1,
+            trace=trace,
+        )
+
+        assert FakeOpenAIClient.calls
+        assert stats.buttons_clicked == 0
+        assert all(action[0] != "click" for action in page.actions)
+        events = await trace.events()
+        turns = [event for event in events if event.kind == "agent_turn"]
+        assert turns[0].payload["source"] == "llm"
+        assert turns[0].payload["input_tokens"] == 11
+
+    asyncio.run(run())
+
+
+def test_agent_driver_ignores_polling_seen_during_llm_wait_for_unique_progress(monkeypatch):
+    async def run():
+        network_events = NetworkEventBuffer()
+
+        class FakeOpenAIClient:
+            def __init__(self, **kwargs):
+                pass
+
+            async def complete(self, context):
+                network_events.record(
+                    method="GET",
+                    url="https://example.com/api/poll",
+                    resource_type="XHR",
+                )
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="llm-click",
+                            name="click_ref",
+                            arguments={"ref": "r1"},
+                        ),
+                    ],
+                    input_tokens=5,
+                    output_tokens=1,
+                )
+
+        monkeypatch.setattr("orbis.agent.driver.OpenAIClient", FakeOpenAIClient)
+        trace = DecisionTrace(scan_id=1)
+
+        await run_agent_interactions(
+            PollingNetworkPage(network_events),
+            scope=Scope(ScopeConfig(include_domains=["example.com"])),
+            mode="llm",
+            max_steps=1,
+            network_events=network_events,
+            trace=trace,
+        )
+
+        events = await trace.events()
+        action = next(event for event in events if event.kind == "action_record")
+        delta = action.payload["network_delta"]
+        assert delta["api_new_requests_count"] == 1
+        assert delta["unique_api_new_requests_count"] == 0
+
+    asyncio.run(run())
+
+
+def test_agent_driver_hybrid_escalates_to_llm_after_planner_no_progress(monkeypatch):
+    class FakeOpenAIClient:
+        calls = []
+
+        def __init__(self, **kwargs):
+            pass
+
+        async def complete(self, context):
+            self.calls.append(context)
+            return AgentResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="llm-give-up",
+                        name="give_up",
+                        arguments={"reason": "no useful semantic action"},
+                    ),
+                ],
+                input_tokens=7,
+                output_tokens=2,
+            )
+
+    async def run():
+        monkeypatch.setattr("orbis.agent.driver.OpenAIClient", FakeOpenAIClient)
+        trace = DecisionTrace(scan_id=1)
+
+        await run_agent_interactions(
+            NoProgressNavPage(),
+            scope=Scope(ScopeConfig(include_domains=["example.com"])),
+            mode="hybrid",
+            max_steps=3,
+            trace=trace,
+        )
+
+        assert len(FakeOpenAIClient.calls) == 1
+        events = await trace.events()
+        sources = [
+            event.payload.get("source")
+            for event in events
+            if event.kind == "agent_turn"
+        ]
+        assert sources == ["local_planner", "local_planner", "llm"]
+
+    asyncio.run(run())
+
+
 def test_agent_driver_records_llm_failure_flagged_item(monkeypatch, tmp_path):
     class FailingOpenAIClient:
         def __init__(self, **kwargs):
@@ -414,7 +593,7 @@ def test_agent_driver_records_llm_failure_flagged_item(monkeypatch, tmp_path):
             raise RuntimeError("api down")
 
     async def run():
-        monkeypatch.setattr("ai_asm.agent.driver.OpenAIClient", FailingOpenAIClient)
+        monkeypatch.setattr("orbis.agent.driver.OpenAIClient", FailingOpenAIClient)
         engine = open_db(tmp_path / "scan.db")
         with Session(engine) as session:
             scan = Scan(target="https://example.com/")
@@ -886,6 +1065,8 @@ def test_meaningful_progress_accepts_new_requests_even_on_revisited_state():
         new_requests=("POST https://example.com/rest/user/login",),
         api_new_requests_count=1,
         api_new_requests=("POST https://example.com/rest/user/login",),
+        unique_api_new_requests_count=1,
+        unique_api_new_requests=("POST https://example.com/rest/user/login",),
         after_url="https://example.com/#/login",
         after_dom_signature="sig-login",
     )
@@ -896,6 +1077,30 @@ def test_meaningful_progress_accepts_new_requests_even_on_revisited_state():
     )
 
     assert _made_meaningful_progress(call, result, delta, after, memory) is True
+
+
+def test_meaningful_progress_ignores_repeated_api_request_on_revisited_state():
+    memory = AgentMemory()
+    memory.remember_state("https://example.com/#/login", "sig-login")
+    call = ToolCall(id="c1", name="click_ref", arguments={"ref": "r1"})
+    result = ToolResult(call_id="c1", tool="click_ref", ok=True)
+    delta = NetworkDelta(
+        new_requests_count=1,
+        new_requests=("GET https://example.com/api/poll",),
+        api_new_requests_count=1,
+        api_new_requests=("GET https://example.com/api/poll",),
+        unique_api_new_requests_count=0,
+        unique_api_new_requests=(),
+        after_url="https://example.com/#/login",
+        after_dom_signature="sig-login",
+    )
+    after = AgentObservation(
+        url="https://example.com/#/login",
+        dom_signature="sig-login",
+        requests=[],
+    )
+
+    assert _made_meaningful_progress(call, result, delta, after, memory) is False
 
 
 def test_meaningful_progress_ignores_asset_only_requests_on_revisited_state():
@@ -914,6 +1119,24 @@ def test_meaningful_progress_ignores_asset_only_requests_on_revisited_state():
     after = AgentObservation(
         url="https://example.com/#/login",
         dom_signature="sig-login",
+        requests=[],
+    )
+
+    assert _made_meaningful_progress(call, result, delta, after, memory) is False
+
+
+def test_meaningful_progress_does_not_treat_submit_without_effect_as_progress():
+    memory = AgentMemory()
+    memory.remember_state("https://example.com/apply", "sig-apply")
+    call = ToolCall(id="c1", name="submit_form", arguments={"ref": "form"})
+    result = ToolResult(call_id="c1", tool="submit_form", ok=True)
+    delta = NetworkDelta(
+        after_url="https://example.com/apply",
+        after_dom_signature="sig-apply",
+    )
+    after = AgentObservation(
+        url="https://example.com/apply",
+        dom_signature="sig-apply",
         requests=[],
     )
 
@@ -943,6 +1166,8 @@ def test_network_delta_counts_repeated_same_url_requests_by_timestamp():
     assert delta.new_requests == ("GET https://example.com/api/poll",)
     assert delta.api_new_requests_count == 1
     assert delta.api_new_requests == ("GET https://example.com/api/poll",)
+    assert delta.unique_api_new_requests_count == 0
+    assert delta.unique_api_new_requests == ()
 
 
 def test_network_delta_falls_back_to_append_count_without_timestamps():
@@ -968,6 +1193,8 @@ def test_network_delta_falls_back_to_append_count_without_timestamps():
     assert delta.new_requests == ("POST https://example.com/api/login",)
     assert delta.api_new_requests_count == 1
     assert delta.api_new_requests == ("POST https://example.com/api/login",)
+    assert delta.unique_api_new_requests_count == 0
+    assert delta.unique_api_new_requests == ()
 
 
 def test_network_delta_separates_api_requests_from_static_assets():
@@ -1011,3 +1238,117 @@ def test_network_delta_separates_api_requests_from_static_assets():
         "GET https://example.com/rest/products/search?q=",
         "POST https://example.com/login",
     )
+    assert delta.unique_api_new_requests_count == 2
+
+
+def test_network_delta_filters_out_of_scope_api_progress():
+    before = AgentObservation(
+        url="https://example.com/",
+        dom_signature="sig",
+        requests=[],
+    )
+    after = AgentObservation(
+        url="https://example.com/",
+        dom_signature="sig",
+        requests=[
+            {
+                "method": "POST",
+                "url": "https://analytics.example.net/collect",
+                "resource_type": "Fetch",
+            },
+            {
+                "method": "GET",
+                "url": "https://example.com/api/users",
+                "resource_type": "XHR",
+            },
+        ],
+    )
+
+    delta = _network_delta(
+        before,
+        after,
+        scope=Scope(ScopeConfig(include_domains=["example.com"])),
+    )
+
+    assert delta.api_new_requests_count == 1
+    assert delta.api_new_requests == ("GET https://example.com/api/users",)
+    assert delta.unique_api_new_requests_count == 1
+    assert delta.unique_api_new_requests == ("GET https://example.com/api/users",)
+
+
+def test_network_delta_keeps_in_scope_websocket_api_progress():
+    before = AgentObservation(
+        url="https://example.com/",
+        dom_signature="sig",
+        requests=[],
+    )
+    after = AgentObservation(
+        url="https://example.com/",
+        dom_signature="sig",
+        requests=[
+            {
+                "method": "GET",
+                "url": "wss://example.com/socket",
+                "resource_type": "WebSocket",
+            },
+        ],
+    )
+
+    delta = _network_delta(
+        before,
+        after,
+        scope=Scope(ScopeConfig(include_domains=["example.com"])),
+    )
+
+    assert delta.api_new_requests_count == 1
+    assert delta.api_new_requests == ("GET wss://example.com/socket",)
+    assert delta.unique_api_new_requests_count == 1
+    assert delta.unique_api_new_requests == ("GET wss://example.com/socket",)
+
+
+def test_network_delta_counts_unique_progress_by_endpoint_surface_not_id():
+    before = AgentObservation(
+        url="https://example.com/jobs",
+        dom_signature="sig",
+        requests=[
+            {
+                "method": "GET",
+                "url": "https://example.com/api/jobs/123?questions=true",
+                "resource_type": "XHR",
+            },
+        ],
+    )
+    after = AgentObservation(
+        url="https://example.com/jobs",
+        dom_signature="sig",
+        requests=[
+            {
+                "method": "GET",
+                "url": "https://example.com/api/jobs/123?questions=true",
+                "resource_type": "XHR",
+            },
+            {
+                "method": "GET",
+                "url": "https://example.com/api/jobs/456?questions=true",
+                "resource_type": "XHR",
+            },
+            {
+                "method": "GET",
+                "url": "https://example.com/api/jobs/456",
+                "resource_type": "XHR",
+            },
+        ],
+    )
+
+    delta = _network_delta(before, after)
+
+    assert delta.api_new_requests_count == 2
+    assert delta.unique_api_new_requests_count == 1
+    assert delta.unique_api_new_requests == ("GET https://example.com/api/jobs/456",)
+
+
+def test_endpoint_surface_key_templates_path_and_keeps_query_names_only():
+    assert endpoint_surface_key({
+        "method": "GET",
+        "url": "https://example.com/api/jobs/123?b=2&a=1",
+    }) == ("GET", "example.com", "/api/jobs/{id}", "a&b")

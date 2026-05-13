@@ -1,11 +1,11 @@
 import asyncio
 import json
 
-from ai_asm.shared.candidate_store import CandidateEndpoint, CandidateStore
-from ai_asm.shared.decision_trace import DecisionTrace
-from ai_asm.shared.facade import RegistryFacade
-from ai_asm.shared.response_store import ResponseStore
-from ai_asm.shared.verified_store import VerifiedEndpoint, VerifiedStore
+from orbis.shared.candidate_store import CandidateEndpoint, CandidateStore
+from orbis.shared.decision_trace import DecisionTrace
+from orbis.shared.facade import RegistryFacade
+from orbis.shared.response_store import ResponseStore
+from orbis.shared.verified_store import VerifiedEndpoint, VerifiedStore
 
 
 def test_candidate_store_dedupes_and_prioritizes_pending():

@@ -3,9 +3,9 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
-from ai_asm.normalizer.types import NormalizedEndpoint, NormalizedParameter
-from ai_asm.normalizer.static import ApiCandidate
-from ai_asm.storage.db import (
+from orbis.normalizer.types import NormalizedEndpoint, NormalizedParameter
+from orbis.normalizer.static import ApiCandidate
+from orbis.storage.db import (
     Endpoint,
     FlaggedItem,
     FrontierState,
@@ -15,7 +15,7 @@ from ai_asm.storage.db import (
     StaticCandidate,
     open_db,
 )
-from ai_asm.storage.repo import (
+from orbis.storage.repo import (
     complete_frontier_item,
     load_pending_frontier,
     record_flagged_item,

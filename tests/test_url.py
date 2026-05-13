@@ -1,6 +1,6 @@
 import pytest
 
-from ai_asm.normalizer.url import templatize_path
+from orbis.normalizer.url import templatize_path
 
 
 @pytest.mark.parametrize("raw,expected", [
